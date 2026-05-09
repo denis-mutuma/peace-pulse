@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 
 from peacepulse_core import (
     ROOT,
+    create_incident_note,
     create_evidence,
     create_report,
     create_resource_event,
@@ -16,6 +17,7 @@ from peacepulse_core import (
     health_status,
     init_db,
     list_evidence,
+    list_incident_notes,
     list_incidents,
     list_rumor_clusters,
     list_status_history,
@@ -51,6 +53,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/health":
                 self.json(health_status())
+            elif path.endswith("/notes") and path.startswith("/api/incidents/"):
+                incident_id = path.split("/")[3]
+                self.json(list_incident_notes(incident_id))
             elif path.endswith("/history") and path.startswith("/api/incidents/"):
                 incident_id = path.split("/")[3]
                 self.json(list_status_history(incident_id))
@@ -81,6 +86,9 @@ class Handler(BaseHTTPRequestHandler):
                 report = create_report(body)
                 incident = triage_report(report["id"])
                 self.json({"report": public_report(report), "incident": incident}, 201)
+            elif path.endswith("/notes") and path.startswith("/api/incidents/"):
+                incident_id = path.split("/")[3]
+                self.json(create_incident_note(incident_id, body), 201)
             elif path == "/api/evidence":
                 self.json(create_evidence(body), 201)
             elif path == "/api/sensor-events":

@@ -249,6 +249,11 @@ function renderIncidents(items) {
       <select data-status="${item.id}">
         ${["new", "assigned", "in_progress", "resolved"].map((status) => `<option ${status === item.status ? "selected" : ""}>${status}</option>`).join("")}
       </select>
+      <form class="noteForm" data-note="${item.id}">
+        <input name="note" placeholder="Add mediation note" maxlength="500" required />
+        <button type="submit">Add note</button>
+      </form>
+      <div class="noteList" data-notes="${item.id}"></div>
     </article>
   `).join("");
   $$("[data-status]").forEach((select) => {
@@ -262,11 +267,50 @@ function renderIncidents(items) {
       }
     });
   });
+  loadVisibleNotes(filtered);
 }
 
 async function loadIncidents() {
   state.incidents = await api("/api/incidents");
   renderIncidents(state.incidents);
+}
+
+async function loadVisibleNotes(items) {
+  await Promise.all(items.map(async (item) => {
+    const target = $(`[data-notes="${item.id}"]`);
+    if (!target) return;
+    try {
+      const notes = await api(`/api/incidents/${item.id}/notes`);
+      target.innerHTML = notes.slice(0, 3).map((note) => `
+        <p><strong>${escapeHtml(note.actor_label)}</strong>: ${escapeHtml(note.note)}</p>
+      `).join("") || `<p class="empty">No mediation notes yet.</p>`;
+    } catch {
+      target.innerHTML = `<p class="empty">Notes unavailable.</p>`;
+    }
+  }));
+  bindNoteForms();
+}
+
+function bindNoteForms() {
+  $$("[data-note]").forEach((form) => {
+    if (form.dataset.bound) return;
+    form.dataset.bound = "true";
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const note = form.elements.note.value.trim();
+      try {
+        await api(`/api/incidents/${form.dataset.note}/notes`, {
+          method: "POST",
+          body: { actor_label: state.role, note },
+        });
+        form.reset();
+        setDashboardResult("Mediation note added.");
+        await loadIncidents();
+      } catch (error) {
+        setDashboardResult(error.message);
+      }
+    });
+  });
 }
 
 async function uploadEvidence(event) {

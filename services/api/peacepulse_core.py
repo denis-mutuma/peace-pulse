@@ -105,6 +105,14 @@ def init_db(seed_demo_data: bool = False) -> None:
                 actor_label TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS incident_notes (
+                id TEXT PRIMARY KEY,
+                incident_id TEXT NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
+                created_at TEXT NOT NULL,
+                actor_label TEXT NOT NULL,
+                note TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS evidence (
                 id TEXT PRIMARY KEY,
                 created_at TEXT NOT NULL,
@@ -396,6 +404,46 @@ def update_incident_status(incident_id: str, status: str, actor_label: str = "re
         return dict(updated)
 
 
+def create_incident_note(incident_id: str, data: dict[str, Any]) -> dict[str, Any]:
+    note = str(data.get("note") or "").strip()
+    actor_label = str(data.get("actor_label") or "responder").strip()[:80] or "responder"
+    if len(note) < 4:
+        raise ValueError("Note must be at least 4 characters.")
+    if len(note) > 500:
+        raise ValueError("Note must be 500 characters or fewer.")
+    with connect() as con:
+        if not con.execute("SELECT 1 FROM incidents WHERE id = ?", (incident_id,)).fetchone():
+            raise ValueError("Incident not found.")
+        record = {
+            "id": new_id("nte"),
+            "incident_id": incident_id,
+            "created_at": now(),
+            "actor_label": actor_label,
+            "note": redact(note),
+        }
+        con.execute(
+            """
+            INSERT INTO incident_notes (id, incident_id, created_at, actor_label, note)
+            VALUES (:id, :incident_id, :created_at, :actor_label, :note)
+            """,
+            record,
+        )
+        enqueue_sync(con, "incident_note", record["id"], record)
+        return record
+
+
+def list_incident_notes(incident_id: str) -> list[dict[str, Any]]:
+    return rows(
+        """
+        SELECT *
+        FROM incident_notes
+        WHERE incident_id = ?
+        ORDER BY created_at DESC, id DESC
+        """,
+        (incident_id,),
+    )
+
+
 def purge_triaged_report_text() -> int:
     with connect() as con:
         result = con.execute(
@@ -676,6 +724,12 @@ def sync_payload_summary(item_type: str, payload: dict[str, Any]) -> dict[str, A
             "severity": payload.get("severity"),
             "cluster_key": payload.get("cluster_key"),
             "redacted_text": payload.get("redacted_text"),
+        }
+    if item_type == "incident_note":
+        return {
+            "incident_id": payload.get("incident_id"),
+            "actor_label": payload.get("actor_label"),
+            "note": payload.get("note"),
         }
     return {"item_type": item_type}
 

@@ -132,6 +132,26 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(payload[0]["new_status"], "assigned")
         self.assertEqual(payload[0]["actor_label"], "shift lead")
 
+    def test_incident_notes_endpoint_creates_and_lists_notes(self):
+        with isolated_core_db(self.tmp.name):
+            report = core.create_report({"text": "Families are turned away after long water queues."})
+            incident = core.triage_report(report["id"])
+            post = FakeHandler(
+                path=f"/api/incidents/{incident['id']}/notes",
+                body={"actor_label": "shift lead", "note": "Assign mediation at Block C-12."},
+            )
+            server.Handler.do_POST(post)
+            handler = FakeHandler(path=f"/api/incidents/{incident['id']}/notes")
+
+            server.Handler.do_GET(handler)
+
+        created = json.loads(post.wfile.getvalue())
+        listed = json.loads(handler.wfile.getvalue())
+        self.assertEqual(post.status, 201)
+        self.assertEqual(handler.status, 200)
+        self.assertEqual(listed[0]["id"], created["id"])
+        self.assertIn("[redacted-location]", listed[0]["note"])
+
 
 class FakeHandler:
     body = server.Handler.body

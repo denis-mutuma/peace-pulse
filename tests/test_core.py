@@ -156,6 +156,43 @@ class CoreTests(unittest.TestCase):
 
         self.assertEqual(core.list_status_history(incident["id"]), [])
 
+    def test_incident_note_is_redacted_and_synced(self):
+        report = core.create_report(
+            {
+                "language": "en",
+                "rough_location": "Main water point",
+                "category_hint": "resource",
+                "text": "Families are turned away after long water queues.",
+            }
+        )
+        incident = core.triage_report(report["id"])
+
+        note = core.create_incident_note(
+            incident["id"],
+            {
+                "actor_label": "water steward",
+                "note": "Called Mr. Kamau at +254 700 000 000 and assigned mediation.",
+            },
+        )
+
+        notes = core.list_incident_notes(incident["id"])
+        payload = json.loads(core.rows("SELECT payload FROM sync_queue WHERE item_type = ?", ("incident_note",))[0]["payload"])
+        self.assertEqual(notes[0]["id"], note["id"])
+        self.assertEqual(notes[0]["actor_label"], "water steward")
+        self.assertIn("[redacted-name]", notes[0]["note"])
+        self.assertIn("[redacted-phone]", payload["note"])
+
+    def test_incident_note_validation(self):
+        with self.assertRaisesRegex(ValueError, "Incident not found."):
+            core.create_incident_note("inc_missing", {"note": "Assign mediation team."})
+
+        report = core.create_report({"text": "Families are turned away after long water queues."})
+        incident = core.triage_report(report["id"])
+        with self.assertRaisesRegex(ValueError, "Note must be at least 4 characters."):
+            core.create_incident_note(incident["id"], {"note": "ok"})
+        with self.assertRaisesRegex(ValueError, "Note must be 500 characters or fewer."):
+            core.create_incident_note(incident["id"], {"note": "x" * 501})
+
     def test_purge_triaged_report_text_keeps_incident_available(self):
         sensitive_text = "Mr. Kamau says call +254 700 000 000 about the blocked clinic queue."
         report = core.create_report(

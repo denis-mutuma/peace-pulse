@@ -238,6 +238,23 @@ textarea {
   color: var(--muted);
 }
 
+.noteForm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  margin-top: 0.8rem;
+}
+
+.noteList {
+  border-top: 1px solid var(--line);
+  margin-top: 0.8rem;
+  padding-top: 0.4rem;
+}
+
+.noteList p {
+  margin: 0.45rem 0;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
