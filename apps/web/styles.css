@@ -220,6 +220,54 @@ textarea {
   gap: 0.8rem;
 }
 
+.routeGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 0.8rem;
+}
+
+.routeTile {
+  min-height: 140px;
+  display: grid;
+  align-content: start;
+  gap: 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 1rem;
+}
+
+.routeTile span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.routeTile strong {
+  font-size: 1.05rem;
+}
+
+.routeTile p {
+  color: var(--muted);
+  margin: 0;
+}
+
+.routeTile em {
+  width: fit-content;
+  border-radius: 999px;
+  background: #e6ece8;
+  color: var(--ink);
+  font-style: normal;
+  padding: 0.25rem 0.55rem;
+}
+
+.routeTile.caution em,
+.routeTile.review em,
+.routeTile.blocked em {
+  background: #fdecec;
+  color: var(--red);
+}
+
 .scenario {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));

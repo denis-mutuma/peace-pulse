@@ -273,13 +273,44 @@
       <section id="routes" class="view">
         <div class="panel">
           <h2>SafeRoute And Service Map</h2>
-          <div class="mockGrid">
-            <span>Water point: open</span>
-            <span>Clinic route: steward review</span>
-            <span>Bridge path: avoid after dark</span>
-            <span>Support desk: open 09:00-16:00</span>
-          </div>
+          <form id="routeForm" class="form">
+            <label>Route or service point
+              <input name="route_label" value="Clinic route" required />
+            </label>
+            <label>Rough location
+              <input name="rough_location" value="East corridor" />
+            </label>
+            <label>Alert type
+              <select name="alert_type">
+                <option value="caution">Caution</option>
+                <option value="blocked">Blocked</option>
+                <option value="service_update">Service update</option>
+              </select>
+            </label>
+            <label>Status
+              <select name="status">
+                <option value="review">Steward review</option>
+                <option value="caution">Caution</option>
+                <option value="blocked">Blocked</option>
+                <option value="open">Open</option>
+              </select>
+            </label>
+            <label class="wide">Steward note
+              <input name="note" maxlength="240" value="Stewards are checking reports about travel after dark." />
+            </label>
+            <button type="submit">Add route alert</button>
+          </form>
+          <div id="routeResult" class="result" role="status"></div>
         </div>
+        <div class="sectionHeader">
+          <h2>Service Points</h2>
+          <button id="refreshRoutes" type="button">Refresh</button>
+        </div>
+        <div id="servicePointGrid" class="routeGrid"></div>
+        <div class="sectionHeader">
+          <h2>Route Alerts</h2>
+        </div>
+        <div id="routeAlertGrid" class="grid"></div>
       </section>
 
       <section id="work" class="view">

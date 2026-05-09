@@ -492,6 +492,40 @@ async function loadResources() {
   `).join("") || `<p class="empty">No resource events yet.</p>`;
 }
 
+async function submitRouteAlert(event) {
+  event.preventDefault();
+  try {
+    const alert = await api("/api/routes/alerts", { method: "POST", body: formData(event.currentTarget) });
+    $("#routeResult").textContent = `Route alert added for ${alert.route_label}.`;
+    event.currentTarget.reset();
+    await loadRoutes();
+    if (state.role === "coordinator") await loadSync().catch(() => {});
+  } catch (error) {
+    $("#routeResult").textContent = error.message;
+  }
+}
+
+async function loadRoutes() {
+  const status = await api("/api/routes/status");
+  $("#servicePointGrid").innerHTML = status.service_points.map((point) => `
+    <article class="routeTile ${point.status}">
+      <span>${escapeHtml(point.kind)}</span>
+      <strong>${escapeHtml(point.label)}</strong>
+      <p>${escapeHtml(point.rough_location)}</p>
+      <em>${escapeHtml(point.status)}</em>
+    </article>
+  `).join("");
+  $("#routeAlertGrid").innerHTML = status.alerts.map((alert) => `
+    <article class="card">
+      <h3>${escapeHtml(alert.route_label)}</h3>
+      <span class="badge ${alert.status === "open" ? "" : "risk"}">${escapeHtml(alert.status)}</span>
+      <span class="badge">${escapeHtml(alert.alert_type.replaceAll("_", " "))}</span>
+      <p><strong>Area:</strong> ${escapeHtml(alert.rough_location)}</p>
+      <p>${escapeHtml(alert.note || "No steward note")}</p>
+    </article>
+  `).join("") || `<p class="empty">No route alerts yet.</p>`;
+}
+
 async function submitRumor(event) {
   event.preventDefault();
   await api("/api/rumors", { method: "POST", body: formData(event.currentTarget) });
@@ -578,7 +612,7 @@ function renderSyncPreview(items) {
 }
 
 async function refreshAll() {
-  await Promise.allSettled([loadIncidents(), loadEvidence(), loadResources(), loadRumors(), loadPrivacyAudit(), checkHub()]);
+  await Promise.allSettled([loadIncidents(), loadEvidence(), loadResources(), loadRoutes(), loadRumors(), loadPrivacyAudit(), checkHub()]);
   if (state.role === "coordinator") await loadSync().catch(() => {});
 }
 
@@ -645,6 +679,8 @@ function bind() {
   $("#refreshDashboard").addEventListener("click", refreshAll);
   $("#evidenceForm").addEventListener("submit", uploadEvidence);
   $("#simulateSensor").addEventListener("click", simulateSensor);
+  $("#routeForm").addEventListener("submit", submitRouteAlert);
+  $("#refreshRoutes").addEventListener("click", loadRoutes);
   $("#rumorForm").addEventListener("submit", submitRumor);
   $("#runSync").addEventListener("click", runSync);
   $("#refreshPrivacy").addEventListener("click", loadPrivacyAudit);
@@ -671,6 +707,7 @@ function activateView(view) {
   $$(".view").forEach((item) => item.classList.toggle("active", item.id === view));
   if (view === "sync") loadSync().catch(() => {});
   if (view === "privacy") loadPrivacyAudit().catch(() => {});
+  if (view === "routes") loadRoutes().catch(() => {});
 }
 
 if ("serviceWorker" in navigator) {
