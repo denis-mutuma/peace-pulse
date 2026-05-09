@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 from peacepulse_core import (
     ROOT,
     create_report,
+    health_status,
     init_db,
     list_incidents,
     public_report,
@@ -38,7 +39,7 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             if path == "/api/health":
-                self.json({"ok": True, "service": "peacepulse-edge"})
+                self.json(health_status())
             elif path == "/api/incidents":
                 self.json(list_incidents())
             elif path.startswith("/api/"):

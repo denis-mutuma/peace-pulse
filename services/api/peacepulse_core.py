@@ -87,6 +87,12 @@ def rows(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
         return [dict(row) for row in con.execute(sql, params).fetchall()]
 
 
+def health_status() -> dict[str, Any]:
+    with connect() as con:
+        con.execute("SELECT 1").fetchone()
+    return {"ok": True, "service": "peacepulse-edge", "database": "ok"}
+
+
 def public_report(report: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in report.items() if key != "text"}
 

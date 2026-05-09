@@ -50,6 +50,19 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(handler.status, 404)
         self.assertEqual(json.loads(handler.wfile.getvalue()), {"error": "Route not found."})
 
+    def test_health_reports_database_status(self):
+        with isolated_core_db(self.tmp.name):
+            handler = FakeHandler(path="/api/health")
+
+            server.Handler.do_GET(handler)
+
+        self.assertEqual(handler.status, 200)
+        self.assertEqual(json.loads(handler.wfile.getvalue()), {
+            "ok": True,
+            "service": "peacepulse-edge",
+            "database": "ok",
+        })
+
     def test_post_report_returns_201_without_raw_text(self):
         with isolated_core_db(self.tmp.name):
             sensitive_text = "Mr. Kamau says call +254 700 000 000 about blocked water access."
