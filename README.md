@@ -18,6 +18,14 @@ The app uses `uv` for Python environment management and only Python standard-lib
 docker compose -f infra/docker-compose.yml up --build
 ```
 
+## Configuration
+
+The API supports these optional environment variables:
+
+- `PEACEPULSE_HOST`: bind host, default `0.0.0.0`.
+- `PEACEPULSE_PORT`: bind port, default `8080`.
+- `PEACEPULSE_DB_PATH`: SQLite database path, default `data/peacepulse.db`.
+
 ## Tests
 
 ```bash
@@ -30,6 +38,8 @@ uv run python -m unittest discover -s tests
 2. Review the redacted incident in the responder dashboard.
 3. Update the incident status as a responder.
 4. Toggle offline mode in the browser, submit another report, then go online and flush the queue.
+
+See [Manual Test Checklist](docs/manual-test.md) for a fuller smoke test.
 
 ## Services
 
