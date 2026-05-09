@@ -90,6 +90,13 @@ Recommended rehearsal order after reset:
 - `services/api`: local edge API, SQLite schema, redaction, triage, evidence, resources, rumors, and sync queue.
 - `infra`: Docker Compose and EC2 deployment notes.
 
+## SafeRoute API
+
+SafeRoute stores rough route and service-point status only. Use `GET /api/routes/status` to list default service points and current alerts, and `POST /api/routes/alerts` to add a redacted route alert for caution, blocked, or service-update conditions.
+
+Route alerts are intentionally coarse. They sync as summaries for coordinator review and do not store GPS traces, person identities, or exact movement history.
+Use the main report flow for detailed unsafe-route narratives that need responder triage.
+
 ## Safety Boundaries
 
 The prototype does not identify people, infer guilt, track individual movement, or expose raw report text through the dashboard API. Triage output is deterministic local assistance for human review.

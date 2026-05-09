@@ -12,6 +12,7 @@ from peacepulse_core import (
     create_incident_note,
     create_evidence,
     create_report,
+    create_route_alert,
     create_resource_event,
     create_rumor,
     health_status,
@@ -25,6 +26,7 @@ from peacepulse_core import (
     public_report,
     privacy_audit,
     reset_demo_data,
+    route_status,
     resource_status,
     run_sync,
     sync_preview,
@@ -73,6 +75,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.json(list_evidence())
             elif path == "/api/resources/status":
                 self.json(resource_status())
+            elif path == "/api/routes/status":
+                self.json(route_status())
             elif path == "/api/rumors/clusters":
                 self.json(list_rumor_clusters())
             elif path == "/api/sync/status":
@@ -101,6 +105,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.json(create_evidence(body), 201)
             elif path == "/api/sensor-events":
                 self.json(create_resource_event(body), 201)
+            elif path == "/api/routes/alerts":
+                self.json(create_route_alert(body), 201)
             elif path == "/api/rumors":
                 self.json(create_rumor(body), 201)
             elif path == "/api/sync/run":

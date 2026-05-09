@@ -409,6 +409,35 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(status[0]["id"], event["id"])
         self.assertEqual(status[0]["maintenance_note"], "pump inspection requested")
 
+    def test_route_alert_is_redacted_listed_and_synced(self):
+        alert = core.create_route_alert(
+            {
+                "route_label": "Clinic route",
+                "rough_location": "East corridor",
+                "alert_type": "blocked",
+                "status": "blocked",
+                "note": "Avoid after dark near Block C-12 and call +254 700 000 000.",
+            }
+        )
+
+        status = core.route_status()
+        payload = json.loads(core.rows("SELECT payload FROM sync_queue WHERE item_type = ?", ("route_alert",))[0]["payload"])
+
+        self.assertEqual(status["alerts"][0]["id"], alert["id"])
+        self.assertEqual(status["service_points"][0]["label"], "North water point")
+        self.assertIn("[redacted-location]", status["alerts"][0]["note"])
+        self.assertIn("[redacted-phone]", payload["note"])
+
+    def test_route_alert_validation(self):
+        with self.assertRaisesRegex(ValueError, "Route label must be at least 3 characters."):
+            core.create_route_alert({"route_label": "x"})
+        with self.assertRaisesRegex(ValueError, "Invalid route alert type."):
+            core.create_route_alert({"route_label": "Clinic route", "alert_type": "danger"})
+        with self.assertRaisesRegex(ValueError, "Invalid route status."):
+            core.create_route_alert({"route_label": "Clinic route", "status": "closed"})
+        with self.assertRaisesRegex(ValueError, "Route note must be 240 characters or fewer."):
+            core.create_route_alert({"route_label": "Clinic route", "note": "x" * 241})
+
     def test_rumor_cluster_payload_is_redacted(self):
         rumor = core.create_rumor(
             {

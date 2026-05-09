@@ -189,6 +189,30 @@ class ApiRouteTests(unittest.TestCase):
         self.assertTrue(any(item["kind"] == "note" for item in payload))
         self.assertTrue(any(item["kind"] == "triage" for item in payload))
 
+    def test_route_alert_endpoints_create_and_list_alerts(self):
+        with isolated_core_db(self.tmp.name):
+            post = FakeHandler(
+                path="/api/routes/alerts",
+                body={
+                    "route_label": "Clinic route",
+                    "rough_location": "East corridor",
+                    "alert_type": "caution",
+                    "status": "review",
+                    "note": "Steward review near Block C-12.",
+                },
+            )
+            server.Handler.do_POST(post)
+            handler = FakeHandler(path="/api/routes/status")
+
+            server.Handler.do_GET(handler)
+
+        created = json.loads(post.wfile.getvalue())
+        listed = json.loads(handler.wfile.getvalue())
+        self.assertEqual(post.status, 201)
+        self.assertEqual(handler.status, 200)
+        self.assertEqual(listed["alerts"][0]["id"], created["id"])
+        self.assertIn("[redacted-location]", listed["alerts"][0]["note"])
+
 
 class FakeHandler:
     body = server.Handler.body

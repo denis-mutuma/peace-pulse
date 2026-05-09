@@ -20,6 +20,8 @@ ALLOWED_LANGUAGES = {"en", "sw", "fr", "ar"}
 MAX_REPORT_TEXT_LENGTH = 2000
 MAX_EVIDENCE_BYTES = 2_000_000
 ALLOWED_EVIDENCE_MIME_PREFIXES = ("image/", "audio/", "text/", "application/pdf")
+ROUTE_ALERT_TYPES = {"blocked", "caution", "service_update"}
+ROUTE_STATUSES = {"open", "caution", "blocked", "review"}
 
 REPORT_CATEGORIES = {
     "resource": ["water", "queue", "pump", "food", "stock", "clinic", "distribution", "solar"],
@@ -37,6 +39,13 @@ PUBLIC_UPDATE_TEMPLATES = {
     "fr": "Les relais communautaires examinent une alerte {category} pres de {location}. Utilisez les points de service verifies et evitez les details identifiants.",
     "ar": "يراجع مشرفو المجتمع بلاغ {category} قرب {location}. استخدموا نقاط الخدمة المؤكدة وتجنبوا مشاركة التفاصيل التي تكشف الهوية.",
 }
+
+SERVICE_POINTS = [
+    {"label": "North water point", "kind": "water", "rough_location": "North zone", "status": "open"},
+    {"label": "Clinic route", "kind": "clinic", "rough_location": "East corridor", "status": "review"},
+    {"label": "Support desk", "kind": "support", "rough_location": "Central market", "status": "open"},
+    {"label": "Bridge path", "kind": "route", "rough_location": "South bridge", "status": "caution"},
+]
 
 SENSITIVE_PATTERNS = [
     (re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE), "[redacted-email]"),
@@ -151,6 +160,16 @@ def init_db(seed_demo_data: bool = False) -> None:
                 anomaly TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS route_alerts (
+                id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                route_label TEXT NOT NULL,
+                rough_location TEXT NOT NULL,
+                alert_type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                note TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS rumors (
                 id TEXT PRIMARY KEY,
                 created_at TEXT NOT NULL,
@@ -255,6 +274,16 @@ def seed_demo(con: sqlite3.Connection) -> None:
         },
         con=con,
     )
+    create_route_alert(
+        {
+            "route_label": "Clinic route",
+            "rough_location": "East corridor",
+            "alert_type": "caution",
+            "status": "review",
+            "note": "Stewards are checking reports about travel after dark.",
+        },
+        con=con,
+    )
 
 
 def reset_demo_data() -> dict[str, Any]:
@@ -269,6 +298,7 @@ def reset_demo_data() -> dict[str, Any]:
             "incidents",
             "reports",
             "resource_events",
+            "route_alerts",
             "rumors",
         ]:
             con.execute(f"DELETE FROM {table}")
@@ -281,6 +311,7 @@ def reset_demo_data() -> dict[str, Any]:
             "reports": len(rows("SELECT id FROM reports")),
             "incidents": len(rows("SELECT id FROM incidents")),
             "resources": len(rows("SELECT id FROM resource_events")),
+            "routes": len(rows("SELECT id FROM route_alerts")),
             "rumors": len(rows("SELECT id FROM rumors")),
         },
     }
@@ -733,6 +764,51 @@ def resource_status() -> list[dict[str, Any]]:
     )
 
 
+def create_route_alert(data: dict[str, Any], con: sqlite3.Connection | None = None) -> dict[str, Any]:
+    owns = con is None
+    con = con or connect()
+    route_label = str(data.get("route_label") or "").strip()[:80]
+    rough_location = str(data.get("rough_location") or "unspecified").strip()[:80]
+    alert_type = str(data.get("alert_type") or "caution").strip()
+    status = str(data.get("status") or "review").strip()
+    note = str(data.get("note") or "").strip()
+    if len(route_label) < 3:
+        raise ValueError("Route label must be at least 3 characters.")
+    if alert_type not in ROUTE_ALERT_TYPES:
+        raise ValueError("Invalid route alert type.")
+    if status not in ROUTE_STATUSES:
+        raise ValueError("Invalid route status.")
+    if len(note) > 240:
+        raise ValueError("Route note must be 240 characters or fewer.")
+    alert = {
+        "id": new_id("rte"),
+        "created_at": now(),
+        "route_label": route_label,
+        "rough_location": rough_location or "unspecified",
+        "alert_type": alert_type,
+        "status": status,
+        "note": redact(note),
+    }
+    con.execute(
+        """
+        INSERT INTO route_alerts (id, created_at, route_label, rough_location, alert_type, status, note)
+        VALUES (:id, :created_at, :route_label, :rough_location, :alert_type, :status, :note)
+        """,
+        alert,
+    )
+    if status in {"caution", "blocked", "review"}:
+        enqueue_sync(con, "route_alert", alert["id"], alert)
+    if owns:
+        con.commit()
+        con.close()
+    return alert
+
+
+def route_status() -> dict[str, Any]:
+    alerts = rows("SELECT * FROM route_alerts ORDER BY created_at DESC, id DESC")
+    return {"service_points": SERVICE_POINTS, "alerts": alerts}
+
+
 def create_rumor(data: dict[str, Any], con: sqlite3.Connection | None = None) -> dict[str, Any]:
     owns = con is None
     con = con or connect()
@@ -867,6 +943,14 @@ def sync_payload_summary(item_type: str, payload: dict[str, Any]) -> dict[str, A
         return {
             "incident_id": payload.get("incident_id"),
             "actor_label": payload.get("actor_label"),
+            "note": payload.get("note"),
+        }
+    if item_type == "route_alert":
+        return {
+            "route_label": payload.get("route_label"),
+            "rough_location": payload.get("rough_location"),
+            "alert_type": payload.get("alert_type"),
+            "status": payload.get("status"),
             "note": payload.get("note"),
         }
     return {"item_type": item_type}
