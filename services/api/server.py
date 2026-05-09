@@ -18,6 +18,7 @@ from peacepulse_core import (
 
 
 WEB_ROOT = ROOT / "apps" / "web"
+MAX_JSON_BODY_BYTES = 16_384
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -80,7 +81,12 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("content-length") or 0)
         if length == 0:
             return {}
-        return json.loads(self.rfile.read(length).decode("utf-8"))
+        if length > MAX_JSON_BODY_BYTES:
+            raise ValueError("Request body is too large.")
+        try:
+            return json.loads(self.rfile.read(length).decode("utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("Request body must be valid JSON.") from exc
 
     def json(self, payload: object, status: int = 200) -> None:
         data = json.dumps(payload).encode("utf-8")

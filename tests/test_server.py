@@ -80,6 +80,24 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(handler.status, 400)
         self.assertEqual(json.loads(handler.wfile.getvalue()), {"error": "Report text must be at least 8 characters."})
 
+    def test_post_report_malformed_json_returns_400(self):
+        with isolated_core_db(self.tmp.name):
+            handler = FakeHandler(path="/api/reports", raw_body=b'{"text":')
+
+            server.Handler.do_POST(handler)
+
+        self.assertEqual(handler.status, 400)
+        self.assertEqual(json.loads(handler.wfile.getvalue()), {"error": "Request body must be valid JSON."})
+
+    def test_post_report_large_body_returns_400(self):
+        with isolated_core_db(self.tmp.name):
+            handler = FakeHandler(path="/api/reports", raw_body=b"x" * (server.MAX_JSON_BODY_BYTES + 1))
+
+            server.Handler.do_POST(handler)
+
+        self.assertEqual(handler.status, 400)
+        self.assertEqual(json.loads(handler.wfile.getvalue()), {"error": "Request body is too large."})
+
 
 class FakeHandler:
     body = server.Handler.body
@@ -87,11 +105,11 @@ class FakeHandler:
     json = server.Handler.json
     error = server.Handler.error
 
-    def __init__(self, path="/", body=None):
+    def __init__(self, path="/", body=None, raw_body=None):
         self.path = path
         self.status = None
         self.response_headers = []
-        raw_body = json.dumps(body or {}).encode("utf-8")
+        raw_body = raw_body if raw_body is not None else json.dumps(body or {}).encode("utf-8")
         if raw_body != b"{}":
             self.headers = {"content-length": str(len(raw_body))}
         else:
