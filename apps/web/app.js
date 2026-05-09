@@ -47,7 +47,14 @@ function setDashboardResult(text) {
 }
 
 function queue() {
-  return JSON.parse(localStorage.getItem("peacepulse-report-queue") || "[]");
+  return JSON.parse(localStorage.getItem("peacepulse-report-queue") || "[]").map((item) => {
+    if (item.payload) return item;
+    return {
+      id: newLocalId(),
+      queued_at: new Date().toISOString(),
+      payload: item,
+    };
+  });
 }
 
 function saveQueue(items) {
@@ -56,7 +63,15 @@ function saveQueue(items) {
 }
 
 function updateQueueCount() {
-  $("#queueCount").textContent = `${queue().length} pending browser item${queue().length === 1 ? "" : "s"}`;
+  const items = queue();
+  $("#queueCount").textContent = `${items.length} pending browser item${items.length === 1 ? "" : "s"}`;
+  $("#queueList").innerHTML = items.slice(0, 5).map((item) => `
+    <p><strong>${escapeHtml(item.payload.category_hint || "report")}</strong> queued ${new Date(item.queued_at).toLocaleString()}</p>
+  `).join("");
+}
+
+function newLocalId() {
+  return `local_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
 function updateTextCount() {
@@ -77,7 +92,7 @@ async function submitReport(event) {
     await refreshAll();
   } catch (error) {
     if (error.queueable) {
-      saveQueue([...queue(), payload]);
+      saveQueue([...queue(), { id: newLocalId(), queued_at: new Date().toISOString(), payload }]);
     }
     setResult(error.message);
   }
@@ -86,10 +101,12 @@ async function submitReport(event) {
 async function flushQueue() {
   const items = queue();
   const remaining = [];
+  let accepted = 0;
   let rejected = 0;
   for (const item of items) {
     try {
-      await api("/api/reports", { method: "POST", body: item });
+      await api("/api/reports", { method: "POST", body: item.payload });
+      accepted += 1;
     } catch (error) {
       if (error.queueable) {
         remaining.push(item);
@@ -100,11 +117,11 @@ async function flushQueue() {
   }
   saveQueue(remaining);
   if (remaining.length) {
-    setResult("Some reports are still queued.");
+    setResult(`${accepted} sent, ${rejected} rejected, ${remaining.length} still queued.`);
   } else if (rejected) {
-    setResult(`${rejected} queued report${rejected === 1 ? "" : "s"} rejected by the hub.`);
+    setResult(`${accepted} sent, ${rejected} rejected by the hub.`);
   } else {
-    setResult("Queued reports sent to the hub.");
+    setResult(`${accepted} queued report${accepted === 1 ? "" : "s"} sent to the hub.`);
   }
   await refreshAll();
 }
