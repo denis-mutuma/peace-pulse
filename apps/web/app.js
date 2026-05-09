@@ -59,6 +59,11 @@ function updateQueueCount() {
   $("#queueCount").textContent = `${queue().length} pending browser item${queue().length === 1 ? "" : "s"}`;
 }
 
+function updateTextCount() {
+  const text = $("#reportForm").elements.text.value;
+  $("#textCount").textContent = `${text.length} / 2000 characters`;
+}
+
 async function submitReport(event) {
   event.preventDefault();
   const form = event.currentTarget;
@@ -68,6 +73,7 @@ async function submitReport(event) {
     setResult(`Submitted and triaged as ${result.incident.category} with severity ${result.incident.severity}.`);
     form.reset();
     form.elements.text.value = "";
+    updateTextCount();
     await refreshAll();
   } catch (error) {
     if (error.queueable) {
@@ -189,7 +195,10 @@ function bind() {
   $("#reportForm").addEventListener("submit", submitReport);
   $("#flushQueue").addEventListener("click", flushQueue);
   $("#refreshDashboard").addEventListener("click", refreshAll);
-  $("#reportForm").addEventListener("input", () => setResult(""));
+  $("#reportForm").addEventListener("input", () => {
+    setResult("");
+    updateTextCount();
+  });
   ["#statusFilter", "#categoryFilter", "#severityFilter"].forEach((selector) => {
     $(selector).addEventListener("change", () => {
       setDashboardResult("");
@@ -204,4 +213,5 @@ if ("serviceWorker" in navigator) {
 
 bind();
 updateQueueCount();
+updateTextCount();
 refreshAll();

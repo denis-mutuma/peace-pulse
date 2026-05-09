@@ -217,6 +217,13 @@ textarea {
   color: var(--muted);
 }
 
+.counter {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: -0.4rem 0 0;
+  text-align: right;
+}
+
 .empty {
   color: var(--muted);
   margin: 1rem 0;

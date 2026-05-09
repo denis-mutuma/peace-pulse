@@ -52,8 +52,9 @@
               </select>
             </label>
             <label class="wide">What happened?
-              <textarea name="text" rows="5">There is tension at the main water point because some families are being turned away.</textarea>
+              <textarea name="text" rows="5" minlength="8" maxlength="2000" required>There is tension at the main water point because some families are being turned away.</textarea>
             </label>
+            <p id="textCount" class="counter wide">0 / 2000 characters</p>
             <p class="notice wide">Avoid names, exact homes, phone numbers, or details that could expose someone.</p>
             <button type="submit">Submit report</button>
           </form>
