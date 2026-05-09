@@ -18,6 +18,8 @@ DB_PATH = Path(os.environ.get("PEACEPULSE_DB_PATH", DATA_DIR / "peacepulse.db"))
 EVIDENCE_DIR = DATA_DIR / "storage" / "evidence"
 ALLOWED_LANGUAGES = {"en", "sw", "fr", "ar"}
 MAX_REPORT_TEXT_LENGTH = 2000
+MAX_EVIDENCE_BYTES = 2_000_000
+ALLOWED_EVIDENCE_MIME_PREFIXES = ("image/", "audio/", "text/", "application/pdf")
 
 REPORT_CATEGORIES = {
     "resource": ["water", "queue", "pump", "food", "stock", "clinic", "distribution", "solar"],
@@ -411,15 +413,37 @@ def xor_bytes(data: bytes) -> bytes:
     return bytes(byte ^ key[index % len(key)] for index, byte in enumerate(data))
 
 
-def create_evidence(data: dict[str, Any]) -> dict[str, Any]:
-    raw_b64 = data.get("content_base64") or ""
+def decode_evidence_content(content_base64: str) -> bytes:
+    raw_b64 = str(content_base64 or "").strip()
     if "," in raw_b64:
         raw_b64 = raw_b64.split(",", 1)[1]
-    raw = base64.b64decode(raw_b64)
+    try:
+        raw = base64.b64decode(raw_b64, validate=True)
+    except ValueError as exc:
+        raise ValueError("Evidence content must be valid base64.") from exc
     if not raw:
         raise ValueError("Evidence content is required.")
+    if len(raw) > MAX_EVIDENCE_BYTES:
+        raise ValueError("Evidence file must be 2 MB or smaller.")
+    return raw
+
+
+def validate_evidence_metadata(data: dict[str, Any]) -> tuple[str, str]:
+    filename = os.path.basename(str(data.get("filename") or "evidence.bin")).strip()[:120]
+    mime_type = str(data.get("mime_type") or "application/octet-stream").strip().lower()[:120]
+    if not filename or filename in {".", ".."}:
+        raise ValueError("Evidence filename is required.")
+    if not re.fullmatch(r"[\w .()+,-]{1,120}", filename):
+        raise ValueError("Evidence filename contains unsupported characters.")
+    if not any(mime_type.startswith(prefix) for prefix in ALLOWED_EVIDENCE_MIME_PREFIXES):
+        raise ValueError("Evidence file type is not supported.")
+    return filename, mime_type
+
+
+def create_evidence(data: dict[str, Any]) -> dict[str, Any]:
+    raw = decode_evidence_content(data.get("content_base64") or "")
+    filename, mime_type = validate_evidence_metadata(data)
     evidence_id = new_id("evd")
-    filename = os.path.basename(str(data.get("filename") or "evidence.bin"))[:120]
     encrypted_path = EVIDENCE_DIR / f"{evidence_id}.bin"
     encrypted_path.write_bytes(xor_bytes(raw))
     try:
@@ -430,7 +454,7 @@ def create_evidence(data: dict[str, Any]) -> dict[str, Any]:
         "id": evidence_id,
         "created_at": now(),
         "filename": filename,
-        "mime_type": str(data.get("mime_type") or "application/octet-stream")[:120],
+        "mime_type": mime_type,
         "sha256": hashlib.sha256(raw).hexdigest(),
         "size_bytes": len(raw),
         "encrypted_path": stored_path,
@@ -594,6 +618,66 @@ def sync_status() -> dict[str, Any]:
     counts = {"pending": 0, "synced": 0}
     counts.update({row["status"]: row["count"] for row in rows_})
     return counts
+
+
+def sync_preview(limit: int = 20) -> list[dict[str, Any]]:
+    limit = max(1, min(int(limit or 20), 100))
+    items = rows(
+        """
+        SELECT id, created_at, item_type, item_id, payload, status, synced_at
+        FROM sync_queue
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+    return [public_sync_item(item) for item in items]
+
+
+def public_sync_item(item: dict[str, Any]) -> dict[str, Any]:
+    payload = json.loads(item["payload"])
+    return {
+        "id": item["id"],
+        "created_at": item["created_at"],
+        "item_type": item["item_type"],
+        "item_id": item["item_id"],
+        "status": item["status"],
+        "synced_at": item["synced_at"],
+        "payload_keys": sorted(payload.keys()),
+        "summary": sync_payload_summary(item["item_type"], payload),
+    }
+
+
+def sync_payload_summary(item_type: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if item_type == "incident_summary":
+        return {
+            "category": payload.get("category"),
+            "severity": payload.get("severity"),
+            "cluster_key": payload.get("cluster_key"),
+            "redacted_text": payload.get("redacted_text"),
+        }
+    if item_type == "evidence_record":
+        return {
+            "filename": payload.get("filename"),
+            "mime_type": payload.get("mime_type"),
+            "sha256": payload.get("sha256"),
+            "size_bytes": payload.get("size_bytes"),
+        }
+    if item_type == "resource_anomaly":
+        return {
+            "resource_id": payload.get("resource_id"),
+            "anomaly": payload.get("anomaly"),
+            "queue_length": payload.get("queue_length"),
+            "uptime": payload.get("uptime"),
+        }
+    if item_type == "rumor_summary":
+        return {
+            "rough_location": payload.get("rough_location"),
+            "severity": payload.get("severity"),
+            "cluster_key": payload.get("cluster_key"),
+            "redacted_text": payload.get("redacted_text"),
+        }
+    return {"item_type": item_type}
 
 
 def run_sync() -> dict[str, Any]:

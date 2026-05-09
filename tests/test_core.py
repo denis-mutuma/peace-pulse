@@ -213,6 +213,69 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(len(evidence["custody"]), 1)
         self.assertNotIn("encrypted_path", json.loads(queued[0]["payload"]))
 
+    def test_evidence_rejects_invalid_base64(self):
+        with self.assertRaisesRegex(ValueError, "Evidence content must be valid base64."):
+            core.create_evidence(
+                {
+                    "filename": "photo.jpg",
+                    "mime_type": "image/jpeg",
+                    "content_base64": "not valid base64",
+                }
+            )
+
+    def test_evidence_rejects_large_files(self):
+        raw = b"x" * (core.MAX_EVIDENCE_BYTES + 1)
+
+        with self.assertRaisesRegex(ValueError, "Evidence file must be 2 MB or smaller."):
+            core.create_evidence(
+                {
+                    "filename": "photo.jpg",
+                    "mime_type": "image/jpeg",
+                    "content_base64": base64.b64encode(raw).decode("ascii"),
+                }
+            )
+
+    def test_evidence_rejects_unsupported_metadata(self):
+        with self.assertRaisesRegex(ValueError, "Evidence filename contains unsupported characters."):
+            core.create_evidence(
+                {
+                    "filename": "bad*name.jpg",
+                    "mime_type": "image/jpeg",
+                    "content_base64": base64.b64encode(b"demo").decode("ascii"),
+                }
+            )
+
+        with self.assertRaisesRegex(ValueError, "Evidence file type is not supported."):
+            core.create_evidence(
+                {
+                    "filename": "script.sh",
+                    "mime_type": "application/x-sh",
+                    "content_base64": base64.b64encode(b"demo").decode("ascii"),
+                }
+            )
+
+    def test_sync_preview_exposes_redacted_summaries(self):
+        sensitive_text = "Mr. Kamau says call +254 700 000 000 about blocked water access."
+        report = core.create_report({"category_hint": "resource", "text": sensitive_text})
+        core.triage_report(report["id"])
+        core.create_evidence(
+            {
+                "filename": "photo.jpg",
+                "mime_type": "image/jpeg",
+                "content_base64": base64.b64encode(b"demo evidence").decode("ascii"),
+                "sync_allowed": True,
+            }
+        )
+
+        preview = core.sync_preview()
+        serialized = json.dumps(preview)
+
+        self.assertGreaterEqual(len(preview), 2)
+        self.assertNotIn(sensitive_text, serialized)
+        self.assertNotIn("encrypted_path", serialized)
+        self.assertIn("[redacted-name]", serialized)
+        self.assertIn("payload_keys", preview[0])
+
     def test_resource_anomaly_and_status(self):
         event = core.create_resource_event(
             {

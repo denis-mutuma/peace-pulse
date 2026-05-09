@@ -22,6 +22,7 @@ from peacepulse_core import (
     public_report,
     resource_status,
     run_sync,
+    sync_preview,
     sync_status,
     triage_report,
     update_incident_status,
@@ -63,6 +64,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.json(list_rumor_clusters())
             elif path == "/api/sync/status":
                 self.json(sync_status())
+            elif path == "/api/sync/preview":
+                self.json(sync_preview())
             elif path.startswith("/api/"):
                 self.error(404, "Route not found.")
             else:
