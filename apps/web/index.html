@@ -174,11 +174,33 @@
       </section>
 
       <section id="sync" class="view">
-        <div class="panel">
+        <div class="sectionHeader">
           <h2>Coordinator Sync</h2>
-          <p id="syncStatus" class="metric">Loading...</p>
           <button id="runSync" type="button">Run sync</button>
         </div>
+        <div class="healthGrid" id="nodeHealth">
+          <div class="metricTile">
+            <span>Hub</span>
+            <strong id="healthHub">Checking</strong>
+          </div>
+          <div class="metricTile">
+            <span>Database</span>
+            <strong id="healthDatabase">Checking</strong>
+          </div>
+          <div class="metricTile">
+            <span>Sync queue</span>
+            <strong id="syncStatus">Loading</strong>
+          </div>
+          <div class="metricTile">
+            <span>Latest resource</span>
+            <strong id="healthResource">Loading</strong>
+          </div>
+          <div class="metricTile">
+            <span>Last sync</span>
+            <strong id="healthLastSync">Not run</strong>
+          </div>
+        </div>
+        <div id="syncPreview" class="syncList"></div>
       </section>
 
       <section id="routes" class="view">

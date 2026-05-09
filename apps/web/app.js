@@ -2,6 +2,7 @@ const state = {
   offline: localStorage.getItem("peacepulse-offline") === "true",
   role: localStorage.getItem("peacepulse-role") || "community",
   incidents: [],
+  lastSyncAt: localStorage.getItem("peacepulse-last-sync") || "",
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -255,17 +256,57 @@ async function loadRumors() {
 }
 
 async function loadSync() {
-  const status = await api("/api/sync/status");
-  $("#syncStatus").textContent = `${status.pending || 0} pending, ${status.synced || 0} synced`;
+  const [health, resources, preview] = await Promise.all([
+    api("/api/health"),
+    api("/api/resources/status"),
+    api("/api/sync/preview"),
+  ]);
+  const latestResource = resources.find((item) => item.anomaly !== "normal") || resources[0];
+  $("#healthHub").textContent = health.ok ? "Online" : "Check";
+  $("#healthDatabase").textContent = health.database || "Unknown";
+  $("#syncStatus").textContent = `${health.sync.pending || 0} pending / ${health.sync.synced || 0} synced`;
+  $("#healthResource").textContent = latestResource ? latestResource.anomaly : "No events";
+  $("#healthLastSync").textContent = state.lastSyncAt ? new Date(state.lastSyncAt).toLocaleString() : "Not run";
+  renderSyncPreview(preview);
 }
 
 async function runSync() {
-  await api("/api/sync/run", { method: "POST", body: {} });
+  const result = await api("/api/sync/run", { method: "POST", body: {} });
+  if (result.synced > 0) {
+    state.lastSyncAt = new Date().toISOString();
+    localStorage.setItem("peacepulse-last-sync", state.lastSyncAt);
+  }
   await loadSync();
 }
 
+function renderSyncPreview(items) {
+  if (!items.length) {
+    $("#syncPreview").innerHTML = `<p class="empty">No sync records yet.</p>`;
+    return;
+  }
+  $("#syncPreview").innerHTML = items.map((item) => `
+    <article class="card syncItem">
+      <div>
+        <h3>${escapeHtml(item.item_type.replaceAll("_", " "))}</h3>
+        <span class="badge">${escapeHtml(item.status)}</span>
+        <span class="badge">${new Date(item.created_at).toLocaleString()}</span>
+      </div>
+      <dl>
+        ${Object.entries(item.summary).map(([key, value]) => `
+          <div>
+            <dt>${escapeHtml(key.replaceAll("_", " "))}</dt>
+            <dd>${escapeHtml(value ?? "not set")}</dd>
+          </div>
+        `).join("")}
+      </dl>
+      <p>Payload keys: ${item.payload_keys.map(escapeHtml).join(", ")}</p>
+    </article>
+  `).join("");
+}
+
 async function refreshAll() {
-  await Promise.allSettled([loadIncidents(), loadEvidence(), loadResources(), loadRumors(), loadSync(), checkHub()]);
+  await Promise.allSettled([loadIncidents(), loadEvidence(), loadResources(), loadRumors(), checkHub()]);
+  if (state.role === "coordinator") await loadSync().catch(() => {});
 }
 
 async function checkHub() {
@@ -295,6 +336,9 @@ function applyRole() {
     const visible = state.role === required || (required === "steward" && state.role === "coordinator");
     item.hidden = !visible;
   });
+  const activeTab = $(".tab.active");
+  if (activeTab?.hidden) activateView("report");
+  if (state.role === "coordinator") loadSync().catch(() => {});
 }
 
 function escapeHtml(value) {
@@ -309,10 +353,8 @@ function escapeHtml(value) {
 function bind() {
   $$(".tab").forEach((tab) => {
     tab.addEventListener("click", () => {
-      $$(".tab").forEach((item) => item.classList.remove("active"));
-      $$(".view").forEach((item) => item.classList.remove("active"));
-      tab.classList.add("active");
-      $(`#${tab.dataset.view}`).classList.add("active");
+      if (tab.hidden) return;
+      activateView(tab.dataset.view);
     });
   });
   $("#offlineToggle").addEventListener("click", () => {
@@ -342,6 +384,12 @@ function bind() {
       renderIncidents(state.incidents);
     });
   });
+}
+
+function activateView(view) {
+  $$(".tab").forEach((item) => item.classList.toggle("active", item.dataset.view === view));
+  $$(".view").forEach((item) => item.classList.toggle("active", item.id === view));
+  if (view === "sync") loadSync().catch(() => {});
 }
 
 if ("serviceWorker" in navigator) {

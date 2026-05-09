@@ -19,4 +19,6 @@ Open `http://localhost:8080`, then verify:
 9. Toggle offline mode, submit a valid report, and confirm it appears in the browser queue.
 10. Toggle online mode, flush the queue, and confirm the accepted/rejected/still queued counts.
 11. Switch to coordinator role, run sync, and confirm pending counts clear.
-12. Visit `/api/health` and confirm it reports `"database": "ok"`.
+12. Confirm the coordinator sync view shows hub health, database status, queue counts, latest resource status, and last sync time.
+13. Confirm the sync preview shows redacted payload summaries and does not show raw report text or local evidence paths.
+14. Visit `/api/health` and confirm it reports `"database": "ok"`.

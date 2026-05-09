@@ -217,6 +217,34 @@ textarea {
   font-weight: 700;
 }
 
+.healthGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.8rem;
+  margin: 1rem 0;
+}
+
+.metricTile {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1rem;
+  min-height: 92px;
+}
+
+.metricTile span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin-bottom: 0.45rem;
+}
+
+.metricTile strong {
+  display: block;
+  font-size: 1.05rem;
+  overflow-wrap: anywhere;
+}
+
 .result {
   margin-top: 1rem;
   color: var(--muted);
@@ -237,6 +265,35 @@ textarea {
 .empty {
   color: var(--muted);
   margin: 1rem 0;
+}
+
+.syncList {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.syncItem {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.syncItem dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.7rem;
+  margin: 0;
+}
+
+.syncItem dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.syncItem dd {
+  margin: 0.15rem 0 0;
+  overflow-wrap: anywhere;
 }
 
 .mockGrid {
