@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+data/*.db
+data/*.db-*
+data/storage/evidence/*
+!data/storage/evidence/.gitkeep
+.pytest_cache/
+node_modules/
+dist/
+combined-peacetech-project.md

@@ -1,0 +1,9 @@
+{
+  "name": "PeacePulse Hub",
+  "short_name": "PeacePulse",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f7f4",
+  "theme_color": "#153d36",
+  "icons": []
+}
