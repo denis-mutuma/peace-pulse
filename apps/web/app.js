@@ -526,6 +526,42 @@ async function loadRoutes() {
   `).join("") || `<p class="empty">No route alerts yet.</p>`;
 }
 
+async function submitOpportunity(event) {
+  event.preventDefault();
+  try {
+    const opportunity = await api("/api/work/opportunities", { method: "POST", body: formData(event.currentTarget) });
+    $("#workResult").textContent = `Opportunity added: ${opportunity.title}.`;
+    event.currentTarget.reset();
+    await loadOpportunities();
+    if (state.role === "coordinator") await loadSync().catch(() => {});
+  } catch (error) {
+    $("#workResult").textContent = error.message;
+  }
+}
+
+async function loadOpportunities() {
+  const items = await api("/api/work/opportunities");
+  $("#workGrid").innerHTML = items.map((item) => `
+    <article class="card">
+      <h3>${escapeHtml(item.title)}</h3>
+      <span class="badge">${escapeHtml(item.skill_category)}</span>
+      <span class="badge ${item.verification_status === "steward_checked" ? "" : "risk"}">${escapeHtml(item.verification_status.replaceAll("_", " "))}</span>
+      <p><strong>Area:</strong> ${escapeHtml(item.rough_location)}</p>
+      <p>${escapeHtml(item.safety_note || "No safety note")}</p>
+    </article>
+  `).join("") || `<p class="empty">No opportunities yet.</p>`;
+}
+
+function prepareExploitationReport() {
+  activateView("report");
+  const form = $("#reportForm");
+  form.elements.category_hint.value = "work_exploitation";
+  form.elements.rough_location.value = "Central market";
+  form.elements.text.value = "A work opportunity may be unsafe or exploitative and needs steward review.";
+  updateTextCount();
+  setResult("Work exploitation report prepared. Add details without names or exact homes, then submit.");
+}
+
 async function submitRumor(event) {
   event.preventDefault();
   await api("/api/rumors", { method: "POST", body: formData(event.currentTarget) });
@@ -612,7 +648,7 @@ function renderSyncPreview(items) {
 }
 
 async function refreshAll() {
-  await Promise.allSettled([loadIncidents(), loadEvidence(), loadResources(), loadRoutes(), loadRumors(), loadPrivacyAudit(), checkHub()]);
+  await Promise.allSettled([loadIncidents(), loadEvidence(), loadResources(), loadRoutes(), loadOpportunities(), loadRumors(), loadPrivacyAudit(), checkHub()]);
   if (state.role === "coordinator") await loadSync().catch(() => {});
 }
 
@@ -681,6 +717,9 @@ function bind() {
   $("#simulateSensor").addEventListener("click", simulateSensor);
   $("#routeForm").addEventListener("submit", submitRouteAlert);
   $("#refreshRoutes").addEventListener("click", loadRoutes);
+  $("#workForm").addEventListener("submit", submitOpportunity);
+  $("#refreshWork").addEventListener("click", loadOpportunities);
+  $("#reportExploitation").addEventListener("click", prepareExploitationReport);
   $("#rumorForm").addEventListener("submit", submitRumor);
   $("#runSync").addEventListener("click", runSync);
   $("#refreshPrivacy").addEventListener("click", loadPrivacyAudit);
@@ -708,6 +747,7 @@ function activateView(view) {
   if (view === "sync") loadSync().catch(() => {});
   if (view === "privacy") loadPrivacyAudit().catch(() => {});
   if (view === "routes") loadRoutes().catch(() => {});
+  if (view === "work") loadOpportunities().catch(() => {});
 }
 
 if ("serviceWorker" in navigator) {

@@ -105,6 +105,43 @@ Only steward-checked opportunity summaries sync. Exploitation concerns should us
 This keeps opportunity coordination separate from identity-based hiring or payroll systems.
 Listings should remain short, role-based, and locally reviewed.
 
+## FairWork Demo
+
+The FairWork tab shows dignified local opportunity summaries and a shortcut for reporting exploitation concerns. Use it near the end of the demo to show how the same hub can reduce conflict pressure through safe coordination without collecting worker identities.
+
+Suggested demo flow:
+
+1. Add a steward-checked opportunity with a rough location.
+2. Show that it appears as a short opportunity card.
+3. Use Report exploitation to prefill the anonymous report form.
+4. Submit only a non-identifying concern if further review is needed.
+5. Inspect coordinator sync to confirm only summary fields appear.
+
+What to avoid:
+
+- Do not enter worker names, phone numbers, or identity document details.
+- Do not present listings as vetted employment contracts.
+- Do not collect payment details or wage disputes in the opportunity card.
+- Use anonymous reporting for safety concerns instead of naming an employer.
+
+During judging, describe FairWork as an extension module: it demonstrates that the same local-first foundation can support opportunity coordination after the safety workflow is proven.
+
+Quick FairWork checks:
+
+- Steward-checked listings appear on the board.
+- Unverified listings are visually marked for caution.
+- Safety notes are redacted before display and sync preview.
+- Exploitation reports return to anonymous intake.
+- No person profile is created during the flow.
+- Reset demo data restores seeded opportunities.
+
+Presentation prompts:
+
+- "What can someone do safely near them?"
+- "Who checked this opportunity?"
+- "What should not be stored?"
+- "Where does an exploitation concern go?"
+
 ## Safety Boundaries
 
 The prototype does not identify people, infer guilt, track individual movement, or expose raw report text through the dashboard API. Triage output is deterministic local assistance for human review.

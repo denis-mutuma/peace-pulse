@@ -316,13 +316,42 @@
       <section id="work" class="view">
         <div class="panel">
           <h2>FairWork Opportunity Board</h2>
-          <div class="mockGrid">
-            <span>Water committee assistant</span>
-            <span>Solar charging steward</span>
-            <span>Translation volunteer</span>
-            <span>Repair skills circle</span>
+          <form id="workForm" class="form">
+            <label>Opportunity title
+              <input name="title" value="Solar charging steward" required />
+            </label>
+            <label>Skill category
+              <select name="skill_category">
+                <option value="water">Water</option>
+                <option value="solar">Solar</option>
+                <option value="translation">Translation</option>
+                <option value="repair">Repair</option>
+                <option value="care">Care</option>
+                <option value="logistics">Logistics</option>
+              </select>
+            </label>
+            <label>Rough location
+              <input name="rough_location" value="Central market" />
+            </label>
+            <label>Verification
+              <select name="verification_status">
+                <option value="steward_checked">Steward checked</option>
+                <option value="unverified">Unverified</option>
+                <option value="paused">Paused</option>
+              </select>
+            </label>
+            <label class="wide">Safety note
+              <input name="safety_note" maxlength="240" value="Community steward verified; no identity documents collected in the hub." />
+            </label>
+            <button type="submit">Add opportunity</button>
+          </form>
+          <div class="actions">
+            <button id="reportExploitation" type="button" class="secondary">Report exploitation</button>
+            <button id="refreshWork" type="button" class="secondary">Refresh</button>
           </div>
+          <div id="workResult" class="result" role="status"></div>
         </div>
+        <div id="workGrid" class="grid"></div>
       </section>
     </main>
 
