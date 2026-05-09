@@ -15,6 +15,7 @@ from peacepulse_core import (
     create_resource_event,
     create_rumor,
     health_status,
+    incident_timeline,
     init_db,
     list_evidence,
     list_incident_notes,
@@ -53,6 +54,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/health":
                 self.json(health_status())
+            elif path.endswith("/timeline") and path.startswith("/api/incidents/"):
+                incident_id = path.split("/")[3]
+                self.json(incident_timeline(incident_id))
             elif path.endswith("/notes") and path.startswith("/api/incidents/"):
                 incident_id = path.split("/")[3]
                 self.json(list_incident_notes(incident_id))

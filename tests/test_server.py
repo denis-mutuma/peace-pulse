@@ -152,6 +152,20 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(listed[0]["id"], created["id"])
         self.assertIn("[redacted-location]", listed[0]["note"])
 
+    def test_incident_timeline_endpoint_returns_events(self):
+        with isolated_core_db(self.tmp.name):
+            report = core.create_report({"text": "Families are turned away after long water queues."})
+            incident = core.triage_report(report["id"])
+            core.create_incident_note(incident["id"], {"note": "Assign mediation team."})
+            handler = FakeHandler(path=f"/api/incidents/{incident['id']}/timeline")
+
+            server.Handler.do_GET(handler)
+
+        payload = json.loads(handler.wfile.getvalue())
+        self.assertEqual(handler.status, 200)
+        self.assertTrue(any(item["kind"] == "note" for item in payload))
+        self.assertTrue(any(item["kind"] == "triage" for item in payload))
+
 
 class FakeHandler:
     body = server.Handler.body

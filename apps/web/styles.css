@@ -255,6 +255,26 @@ textarea {
   margin: 0.45rem 0;
 }
 
+.timeline {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.7rem;
+}
+
+.timeline div {
+  border-left: 3px solid var(--teal);
+  padding-left: 0.7rem;
+}
+
+.timeline strong {
+  display: block;
+  margin: 0.25rem 0;
+}
+
+.timeline p {
+  margin: 0;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;

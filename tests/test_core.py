@@ -193,6 +193,34 @@ class CoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Note must be 500 characters or fewer."):
             core.create_incident_note(incident["id"], {"note": "x" * 501})
 
+    def test_incident_timeline_combines_related_events(self):
+        report = core.create_report(
+            {
+                "rough_location": "North water point",
+                "category_hint": "resource",
+                "text": "Families are turned away after long water queues.",
+            }
+        )
+        incident = core.triage_report(report["id"])
+        core.update_incident_status(incident["id"], "assigned", "shift lead")
+        core.create_incident_note(incident["id"], {"note": "Mediation team assigned."})
+        core.create_evidence(
+            {
+                "filename": "note.txt",
+                "mime_type": "text/plain",
+                "content_base64": base64.b64encode(b"demo").decode("ascii"),
+                "linked_report_id": report["id"],
+            }
+        )
+        core.create_resource_event({"resource_id": "north-water-point", "queue_length": 52, "flow_rate": 0.4, "uptime": 0})
+        core.create_rumor({"rough_location": "North water point", "text": "People say aid is diverted near the water point."})
+
+        timeline = core.incident_timeline(incident["id"])
+        kinds = {item["kind"] for item in timeline}
+
+        self.assertTrue({"triage", "status", "note", "evidence", "resource", "rumor"}.issubset(kinds))
+        self.assertNotIn("demo", json.dumps(timeline))
+
     def test_purge_triaged_report_text_keeps_incident_available(self):
         sensitive_text = "Mr. Kamau says call +254 700 000 000 about the blocked clinic queue."
         report = core.create_report(

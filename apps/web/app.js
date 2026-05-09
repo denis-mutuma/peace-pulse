@@ -254,6 +254,8 @@ function renderIncidents(items) {
         <button type="submit">Add note</button>
       </form>
       <div class="noteList" data-notes="${item.id}"></div>
+      <button class="secondary" type="button" data-timeline="${item.id}">Show timeline</button>
+      <div class="timeline" data-timeline-list="${item.id}"></div>
     </article>
   `).join("");
   $$("[data-status]").forEach((select) => {
@@ -268,6 +270,7 @@ function renderIncidents(items) {
     });
   });
   loadVisibleNotes(filtered);
+  bindTimelineButtons();
 }
 
 async function loadIncidents() {
@@ -308,6 +311,37 @@ function bindNoteForms() {
         await loadIncidents();
       } catch (error) {
         setDashboardResult(error.message);
+      }
+    });
+  });
+}
+
+function bindTimelineButtons() {
+  $$("[data-timeline]").forEach((button) => {
+    if (button.dataset.bound) return;
+    button.dataset.bound = "true";
+    button.addEventListener("click", async () => {
+      const target = $(`[data-timeline-list="${button.dataset.timeline}"]`);
+      const expanded = target.dataset.expanded === "true";
+      if (expanded) {
+        target.dataset.expanded = "false";
+        target.innerHTML = "";
+        button.textContent = "Show timeline";
+        return;
+      }
+      try {
+        const items = await api(`/api/incidents/${button.dataset.timeline}/timeline`);
+        target.dataset.expanded = "true";
+        target.innerHTML = items.map((item) => `
+          <div>
+            <span class="badge">${escapeHtml(item.kind)}</span>
+            <strong>${escapeHtml(item.title)}</strong>
+            <p>${escapeHtml(item.detail)}</p>
+          </div>
+        `).join("");
+        button.textContent = "Hide timeline";
+      } catch (error) {
+        target.innerHTML = `<p class="empty">${escapeHtml(error.message)}</p>`;
       }
     });
   });

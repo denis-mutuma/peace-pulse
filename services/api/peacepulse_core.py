@@ -444,6 +444,77 @@ def list_incident_notes(incident_id: str) -> list[dict[str, Any]]:
     )
 
 
+def incident_timeline(incident_id: str) -> list[dict[str, Any]]:
+    with connect() as con:
+        incident = con.execute(
+            """
+            SELECT i.*, r.rough_location
+            FROM incidents i JOIN reports r ON r.id = i.report_id
+            WHERE i.id = ?
+            """,
+            (incident_id,),
+        ).fetchone()
+    if not incident:
+        raise ValueError("Incident not found.")
+
+    location = incident["rough_location"]
+    events = [
+        {
+            "created_at": incident["created_at"],
+            "kind": "triage",
+            "title": f"{incident['category'].replace('_', ' ')} triaged",
+            "detail": f"Severity {incident['severity']} with {round(incident['confidence'] * 100)}% confidence.",
+        }
+    ]
+    for item in list_status_history(incident_id):
+        events.append(
+            {
+                "created_at": item["created_at"],
+                "kind": "status",
+                "title": f"{item['previous_status']} -> {item['new_status']}",
+                "detail": f"Updated by {item['actor_label']}.",
+            }
+        )
+    for item in list_incident_notes(incident_id):
+        events.append(
+            {
+                "created_at": item["created_at"],
+                "kind": "note",
+                "title": f"Note by {item['actor_label']}",
+                "detail": item["note"],
+            }
+        )
+    for item in rows("SELECT * FROM evidence WHERE linked_report_id = ? ORDER BY created_at DESC", (incident["report_id"],)):
+        events.append(
+            {
+                "created_at": item["created_at"],
+                "kind": "evidence",
+                "title": item["filename"],
+                "detail": f"SHA-256 {item['sha256'][:16]}... metadata only.",
+            }
+        )
+    for item in rows("SELECT * FROM resource_events WHERE resource_id LIKE ? ORDER BY created_at DESC LIMIT 3", (f"%{location.split()[0].lower()}%",)):
+        events.append(
+            {
+                "created_at": item["created_at"],
+                "kind": "resource",
+                "title": item["resource_id"],
+                "detail": f"{item['anomaly']}; queue {item['queue_length']}; flow {item['flow_rate']}.",
+            }
+        )
+    for cluster in list_rumor_clusters():
+        if location.lower().split()[0] in cluster["cluster_key"]:
+            events.append(
+                {
+                    "created_at": cluster["latest_at"],
+                    "kind": "rumor",
+                    "title": f"{cluster['count']} related rumor report(s)",
+                    "detail": f"Max severity {cluster['max_severity']}; human review required.",
+                }
+            )
+    return sorted(events, key=lambda item: (item["created_at"], item["kind"]), reverse=True)
+
+
 def purge_triaged_report_text() -> int:
     with connect() as con:
         result = con.execute(
