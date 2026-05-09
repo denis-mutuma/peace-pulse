@@ -1,3 +1,5 @@
+import base64
+import json
 import sys
 import tempfile
 import unittest
@@ -15,6 +17,7 @@ class CoreTests(unittest.TestCase):
         root = Path(self.tmp.name)
         core.DATA_DIR = root / "data"
         core.DB_PATH = core.DATA_DIR / "peacepulse.db"
+        core.EVIDENCE_DIR = core.DATA_DIR / "storage" / "evidence"
         core.init_db()
 
     def tearDown(self):
@@ -177,6 +180,7 @@ class CoreTests(unittest.TestCase):
     def test_env_db_path_is_honored(self):
         original_data_dir = core.DATA_DIR
         original_db_path = core.DB_PATH
+        original_evidence_dir = core.EVIDENCE_DIR
         env_db = Path(self.tmp.name) / "env" / "peacepulse.db"
         try:
             with patch.dict("os.environ", {"PEACEPULSE_DB_PATH": str(env_db)}):
@@ -188,6 +192,69 @@ class CoreTests(unittest.TestCase):
         finally:
             core.DATA_DIR = original_data_dir
             core.DB_PATH = original_db_path
+            core.EVIDENCE_DIR = original_evidence_dir
+
+    def test_evidence_hash_and_custody(self):
+        raw = b"demo evidence"
+        record = core.create_evidence(
+            {
+                "filename": "photo.jpg",
+                "mime_type": "image/jpeg",
+                "content_base64": base64.b64encode(raw).decode("ascii"),
+                "sync_allowed": True,
+            }
+        )
+
+        evidence = core.list_evidence()[0]
+        queued = core.rows("SELECT payload FROM sync_queue WHERE item_type = ?", ("evidence_record",))
+
+        self.assertEqual(record["sha256"], evidence["sha256"])
+        self.assertEqual(record["size_bytes"], len(raw))
+        self.assertEqual(len(evidence["custody"]), 1)
+        self.assertNotIn("encrypted_path", json.loads(queued[0]["payload"]))
+
+    def test_resource_anomaly_and_status(self):
+        event = core.create_resource_event(
+            {
+                "resource_id": "water-point-north",
+                "queue_length": 55,
+                "flow_rate": 0.2,
+                "uptime": 0,
+                "maintenance_note": "pump inspection requested",
+            }
+        )
+
+        status = core.resource_status()
+
+        self.assertIn("pump offline", event["anomaly"])
+        self.assertEqual(status[0]["id"], event["id"])
+        self.assertEqual(status[0]["maintenance_note"], "pump inspection requested")
+
+    def test_rumor_cluster_payload_is_redacted(self):
+        rumor = core.create_rumor(
+            {
+                "language": "en",
+                "rough_location": "North water point",
+                "text": "Ms. Amina says call +254 700 000 000 because aid is diverted.",
+            }
+        )
+
+        clusters = core.list_rumor_clusters()
+        payload = json.loads(core.rows("SELECT payload FROM sync_queue WHERE item_type = ?", ("rumor_summary",))[0]["payload"])
+
+        self.assertEqual(clusters[0]["count"], 1)
+        self.assertIn("[redacted-name]", clusters[0]["items"][0]["redacted_text"])
+        self.assertNotIn("text", payload)
+        self.assertIn("[redacted-phone]", payload["redacted_text"])
+
+    def test_run_sync_marks_pending_items_synced(self):
+        report = core.create_report({"text": "Families need help at the water queue."})
+        core.triage_report(report["id"])
+
+        result = core.run_sync()
+
+        self.assertGreaterEqual(result["synced"], 1)
+        self.assertEqual(core.sync_status()["pending"], 0)
 
 
 if __name__ == "__main__":
