@@ -61,6 +61,8 @@ async function submitReport(event) {
   try {
     const result = await api("/api/reports", { method: "POST", body: payload });
     setResult(`Submitted and triaged as ${result.incident.category} with severity ${result.incident.severity}.`);
+    form.reset();
+    form.elements.text.value = "";
     await refreshAll();
   } catch (error) {
     if (error.queueable) {
@@ -164,6 +166,7 @@ function bind() {
   $("#reportForm").addEventListener("submit", submitReport);
   $("#flushQueue").addEventListener("click", flushQueue);
   $("#refreshDashboard").addEventListener("click", refreshAll);
+  $("#reportForm").addEventListener("input", () => setResult(""));
 }
 
 if ("serviceWorker" in navigator) {
