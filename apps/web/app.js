@@ -1,5 +1,6 @@
 const state = {
   offline: localStorage.getItem("peacepulse-offline") === "true",
+  incidents: [],
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -39,6 +40,10 @@ function formData(form) {
 
 function setResult(text) {
   $("#reportResult").textContent = text;
+}
+
+function setDashboardResult(text) {
+  $("#dashboardResult").textContent = text;
 }
 
 function queue() {
@@ -99,7 +104,19 @@ async function flushQueue() {
 }
 
 function renderIncidents(items) {
-  $("#incidentGrid").innerHTML = items.map((item) => `
+  const status = $("#statusFilter").value;
+  const category = $("#categoryFilter").value;
+  const minSeverity = Number($("#severityFilter").value || 1);
+  const filtered = items.filter((item) =>
+    (!status || item.status === status) &&
+    (!category || item.category === category) &&
+    item.severity >= minSeverity
+  );
+  if (!filtered.length) {
+    $("#incidentGrid").innerHTML = `<p class="empty">No incidents match the current filters.</p>`;
+    return;
+  }
+  $("#incidentGrid").innerHTML = filtered.map((item) => `
     <article class="card">
       <h3>${item.category.replaceAll("_", " ")}</h3>
       <span class="badge risk">Severity ${item.severity}</span>
@@ -115,14 +132,20 @@ function renderIncidents(items) {
   `).join("");
   $$("[data-status]").forEach((select) => {
     select.addEventListener("change", async () => {
-      await api(`/api/incidents/${select.dataset.status}/status`, { method: "PATCH", body: { status: select.value } });
-      await loadIncidents();
+      try {
+        await api(`/api/incidents/${select.dataset.status}/status`, { method: "PATCH", body: { status: select.value } });
+        setDashboardResult("Incident status updated.");
+        await loadIncidents();
+      } catch (error) {
+        setDashboardResult(error.message);
+      }
     });
   });
 }
 
 async function loadIncidents() {
-  renderIncidents(await api("/api/incidents"));
+  state.incidents = await api("/api/incidents");
+  renderIncidents(state.incidents);
 }
 
 async function refreshAll() {
@@ -167,6 +190,12 @@ function bind() {
   $("#flushQueue").addEventListener("click", flushQueue);
   $("#refreshDashboard").addEventListener("click", refreshAll);
   $("#reportForm").addEventListener("input", () => setResult(""));
+  ["#statusFilter", "#categoryFilter", "#severityFilter"].forEach((selector) => {
+    $(selector).addEventListener("change", () => {
+      setDashboardResult("");
+      renderIncidents(state.incidents);
+    });
+  });
 }
 
 if ("serviceWorker" in navigator) {

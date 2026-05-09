@@ -169,6 +169,13 @@ textarea {
   margin-top: 1rem;
 }
 
+.filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.8rem;
+  margin: 1rem 0;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -210,6 +217,11 @@ textarea {
   color: var(--muted);
 }
 
+.empty {
+  color: var(--muted);
+  margin: 1rem 0;
+}
+
 @media (max-width: 720px) {
   .topbar {
     align-items: flex-start;
@@ -221,6 +233,10 @@ textarea {
   }
 
   .form {
+    grid-template-columns: 1fr;
+  }
+
+  .filters {
     grid-template-columns: 1fr;
   }
 }

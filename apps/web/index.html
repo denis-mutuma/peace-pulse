@@ -71,6 +71,40 @@
           <h2>Responder Dashboard</h2>
           <button id="refreshDashboard" type="button">Refresh</button>
         </div>
+        <div class="filters" aria-label="Incident filters">
+          <label>Status
+            <select id="statusFilter">
+              <option value="">Any status</option>
+              <option value="new">New</option>
+              <option value="assigned">Assigned</option>
+              <option value="in_progress">In progress</option>
+              <option value="resolved">Resolved</option>
+            </select>
+          </label>
+          <label>Category
+            <select id="categoryFilter">
+              <option value="">Any category</option>
+              <option value="resource">Resource dispute</option>
+              <option value="threat">Threat or intimidation</option>
+              <option value="corruption">Corruption or abuse</option>
+              <option value="service_denial">Service denial</option>
+              <option value="rumor">Harmful rumor</option>
+              <option value="unsafe_route">Unsafe route</option>
+              <option value="work_exploitation">Work exploitation</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <label>Minimum severity
+            <select id="severityFilter">
+              <option value="1">1+</option>
+              <option value="2">2+</option>
+              <option value="3">3+</option>
+              <option value="4">4+</option>
+              <option value="5">5</option>
+            </select>
+          </label>
+        </div>
+        <div id="dashboardResult" class="result" role="status"></div>
         <div id="incidentGrid" class="grid"></div>
       </section>
     </main>
