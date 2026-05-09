@@ -7,6 +7,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "services" / "api"))
 
+import peacepulse_core as core
 import server
 
 
@@ -34,6 +35,12 @@ class StaticFileTests(unittest.TestCase):
 
 
 class ApiRouteTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
     def test_unknown_api_get_returns_404(self):
         handler = FakeHandler()
         handler.path = "/api/evidence"
@@ -43,25 +50,79 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(handler.status, 404)
         self.assertEqual(json.loads(handler.wfile.getvalue()), {"error": "Route not found."})
 
+    def test_post_report_returns_201_without_raw_text(self):
+        with isolated_core_db(self.tmp.name):
+            sensitive_text = "Mr. Kamau says call +254 700 000 000 about blocked water access."
+            handler = FakeHandler(
+                path="/api/reports",
+                body={
+                    "language": "en",
+                    "rough_location": "Main water point",
+                    "category_hint": "resource",
+                    "text": sensitive_text,
+                },
+            )
+
+            server.Handler.do_POST(handler)
+
+        payload = json.loads(handler.wfile.getvalue())
+        self.assertEqual(handler.status, 201)
+        self.assertNotIn("text", payload["report"])
+        self.assertNotIn(sensitive_text, json.dumps(payload))
+        self.assertIn("[redacted-name]", payload["incident"]["redacted_text"])
+
+    def test_post_report_validation_error_returns_400(self):
+        with isolated_core_db(self.tmp.name):
+            handler = FakeHandler(path="/api/reports", body={"text": "short"})
+
+            server.Handler.do_POST(handler)
+
+        self.assertEqual(handler.status, 400)
+        self.assertEqual(json.loads(handler.wfile.getvalue()), {"error": "Report text must be at least 8 characters."})
+
 
 class FakeHandler:
+    body = server.Handler.body
     static = server.Handler.static
     json = server.Handler.json
     error = server.Handler.error
 
-    def __init__(self):
-        self.headers = []
+    def __init__(self, path="/", body=None):
+        self.path = path
         self.status = None
+        self.response_headers = []
+        raw_body = json.dumps(body or {}).encode("utf-8")
+        if raw_body != b"{}":
+            self.headers = {"content-length": str(len(raw_body))}
+        else:
+            self.headers = {}
+        self.rfile = io.BytesIO(raw_body)
         self.wfile = io.BytesIO()
 
     def send_response(self, status):
         self.status = status
 
     def send_header(self, key, value):
-        self.headers.append((key, value))
+        self.response_headers.append((key, value))
 
     def end_headers(self):
         pass
+
+
+class isolated_core_db:
+    def __init__(self, root):
+        self.root = Path(root)
+
+    def __enter__(self):
+        self.original_data_dir = core.DATA_DIR
+        self.original_db_path = core.DB_PATH
+        core.DATA_DIR = self.root / "data"
+        core.DB_PATH = core.DATA_DIR / "peacepulse.db"
+        server.init_db()
+
+    def __exit__(self, exc_type, exc, tb):
+        core.DATA_DIR = self.original_data_dir
+        core.DB_PATH = self.original_db_path
 
 
 if __name__ == "__main__":
