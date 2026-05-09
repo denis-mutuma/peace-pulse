@@ -22,6 +22,8 @@ MAX_EVIDENCE_BYTES = 2_000_000
 ALLOWED_EVIDENCE_MIME_PREFIXES = ("image/", "audio/", "text/", "application/pdf")
 ROUTE_ALERT_TYPES = {"blocked", "caution", "service_update"}
 ROUTE_STATUSES = {"open", "caution", "blocked", "review"}
+WORK_SKILL_CATEGORIES = {"water", "solar", "translation", "repair", "care", "logistics"}
+WORK_VERIFICATION_STATUSES = {"unverified", "steward_checked", "paused"}
 
 REPORT_CATEGORIES = {
     "resource": ["water", "queue", "pump", "food", "stock", "clinic", "distribution", "solar"],
@@ -170,6 +172,16 @@ def init_db(seed_demo_data: bool = False) -> None:
                 note TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS opportunities (
+                id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                title TEXT NOT NULL,
+                skill_category TEXT NOT NULL,
+                rough_location TEXT NOT NULL,
+                verification_status TEXT NOT NULL,
+                safety_note TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS rumors (
                 id TEXT PRIMARY KEY,
                 created_at TEXT NOT NULL,
@@ -284,6 +296,23 @@ def seed_demo(con: sqlite3.Connection) -> None:
         },
         con=con,
     )
+    for opportunity in [
+        {
+            "title": "Water committee assistant",
+            "skill_category": "water",
+            "rough_location": "North water point",
+            "verification_status": "steward_checked",
+            "safety_note": "Short shifts coordinated by community stewards.",
+        },
+        {
+            "title": "Translation volunteer",
+            "skill_category": "translation",
+            "rough_location": "Support desk",
+            "verification_status": "steward_checked",
+            "safety_note": "No identity documents collected in the hub.",
+        },
+    ]:
+        create_opportunity(opportunity, con=con)
 
 
 def reset_demo_data() -> dict[str, Any]:
@@ -299,6 +328,7 @@ def reset_demo_data() -> dict[str, Any]:
             "reports",
             "resource_events",
             "route_alerts",
+            "opportunities",
             "rumors",
         ]:
             con.execute(f"DELETE FROM {table}")
@@ -312,6 +342,7 @@ def reset_demo_data() -> dict[str, Any]:
             "incidents": len(rows("SELECT id FROM incidents")),
             "resources": len(rows("SELECT id FROM resource_events")),
             "routes": len(rows("SELECT id FROM route_alerts")),
+            "opportunities": len(rows("SELECT id FROM opportunities")),
             "rumors": len(rows("SELECT id FROM rumors")),
         },
     }
@@ -809,6 +840,50 @@ def route_status() -> dict[str, Any]:
     return {"service_points": SERVICE_POINTS, "alerts": alerts}
 
 
+def create_opportunity(data: dict[str, Any], con: sqlite3.Connection | None = None) -> dict[str, Any]:
+    owns = con is None
+    con = con or connect()
+    title = str(data.get("title") or "").strip()[:100]
+    skill_category = str(data.get("skill_category") or "").strip()
+    verification_status = str(data.get("verification_status") or "unverified").strip()
+    safety_note = str(data.get("safety_note") or "").strip()
+    if len(title) < 4:
+        raise ValueError("Opportunity title must be at least 4 characters.")
+    if skill_category not in WORK_SKILL_CATEGORIES:
+        raise ValueError("Invalid skill category.")
+    if verification_status not in WORK_VERIFICATION_STATUSES:
+        raise ValueError("Invalid verification status.")
+    if len(safety_note) > 240:
+        raise ValueError("Safety note must be 240 characters or fewer.")
+    opportunity = {
+        "id": new_id("opp"),
+        "created_at": now(),
+        "title": redact(title),
+        "skill_category": skill_category,
+        "rough_location": str(data.get("rough_location") or "unspecified").strip()[:80] or "unspecified",
+        "verification_status": verification_status,
+        "safety_note": redact(safety_note),
+    }
+    con.execute(
+        """
+        INSERT INTO opportunities
+        (id, created_at, title, skill_category, rough_location, verification_status, safety_note)
+        VALUES (:id, :created_at, :title, :skill_category, :rough_location, :verification_status, :safety_note)
+        """,
+        opportunity,
+    )
+    if verification_status == "steward_checked":
+        enqueue_sync(con, "opportunity_summary", opportunity["id"], opportunity)
+    if owns:
+        con.commit()
+        con.close()
+    return opportunity
+
+
+def list_opportunities() -> list[dict[str, Any]]:
+    return rows("SELECT * FROM opportunities ORDER BY created_at DESC, id DESC")
+
+
 def create_rumor(data: dict[str, Any], con: sqlite3.Connection | None = None) -> dict[str, Any]:
     owns = con is None
     con = con or connect()
@@ -952,6 +1027,13 @@ def sync_payload_summary(item_type: str, payload: dict[str, Any]) -> dict[str, A
             "alert_type": payload.get("alert_type"),
             "status": payload.get("status"),
             "note": payload.get("note"),
+        }
+    if item_type == "opportunity_summary":
+        return {
+            "title": payload.get("title"),
+            "skill_category": payload.get("skill_category"),
+            "rough_location": payload.get("rough_location"),
+            "verification_status": payload.get("verification_status"),
         }
     return {"item_type": item_type}
 

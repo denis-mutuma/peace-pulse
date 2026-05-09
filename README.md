@@ -97,6 +97,14 @@ SafeRoute stores rough route and service-point status only. Use `GET /api/routes
 Route alerts are intentionally coarse. They sync as summaries for coordinator review and do not store GPS traces, person identities, or exact movement history.
 Use the main report flow for detailed unsafe-route narratives that need responder triage.
 
+## FairWork API
+
+FairWork stores local opportunity summaries without worker profiles or employer identity claims. Use `GET /api/work/opportunities` to list opportunities and `POST /api/work/opportunities` to add a steward-reviewed listing.
+
+Only steward-checked opportunity summaries sync. Exploitation concerns should use the existing anonymous report flow with the `work_exploitation` concern type.
+This keeps opportunity coordination separate from identity-based hiring or payroll systems.
+Listings should remain short, role-based, and locally reviewed.
+
 ## Safety Boundaries
 
 The prototype does not identify people, infer guilt, track individual movement, or expose raw report text through the dashboard API. Triage output is deterministic local assistance for human review.

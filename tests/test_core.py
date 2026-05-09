@@ -438,6 +438,36 @@ class CoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Route note must be 240 characters or fewer."):
             core.create_route_alert({"route_label": "Clinic route", "note": "x" * 241})
 
+    def test_opportunity_is_redacted_listed_and_synced(self):
+        opportunity = core.create_opportunity(
+            {
+                "title": "Repair assistant for Mr. Kamau",
+                "skill_category": "repair",
+                "rough_location": "Central workshop",
+                "verification_status": "steward_checked",
+                "safety_note": "Do not share phone +254 700 000 000 in listings.",
+            }
+        )
+
+        listed = core.list_opportunities()
+        payload = json.loads(core.rows("SELECT payload FROM sync_queue WHERE item_type = ?", ("opportunity_summary",))[0]["payload"])
+
+        self.assertEqual(listed[0]["id"], opportunity["id"])
+        self.assertIn("[redacted-name]", listed[0]["title"])
+        self.assertIn("[redacted-phone]", listed[0]["safety_note"])
+        self.assertNotIn("phone", json.dumps(core.sync_preview()).lower())
+        self.assertEqual(payload["skill_category"], "repair")
+
+    def test_opportunity_validation(self):
+        with self.assertRaisesRegex(ValueError, "Opportunity title must be at least 4 characters."):
+            core.create_opportunity({"title": "job"})
+        with self.assertRaisesRegex(ValueError, "Invalid skill category."):
+            core.create_opportunity({"title": "Clinic helper", "skill_category": "security"})
+        with self.assertRaisesRegex(ValueError, "Invalid verification status."):
+            core.create_opportunity({"title": "Clinic helper", "skill_category": "care", "verification_status": "approved"})
+        with self.assertRaisesRegex(ValueError, "Safety note must be 240 characters or fewer."):
+            core.create_opportunity({"title": "Clinic helper", "skill_category": "care", "safety_note": "x" * 241})
+
     def test_rumor_cluster_payload_is_redacted(self):
         rumor = core.create_rumor(
             {

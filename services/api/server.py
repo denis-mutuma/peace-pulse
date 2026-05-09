@@ -11,6 +11,7 @@ from peacepulse_core import (
     ROOT,
     create_incident_note,
     create_evidence,
+    create_opportunity,
     create_report,
     create_route_alert,
     create_resource_event,
@@ -21,6 +22,7 @@ from peacepulse_core import (
     list_evidence,
     list_incident_notes,
     list_incidents,
+    list_opportunities,
     list_rumor_clusters,
     list_status_history,
     public_report,
@@ -77,6 +79,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.json(resource_status())
             elif path == "/api/routes/status":
                 self.json(route_status())
+            elif path == "/api/work/opportunities":
+                self.json(list_opportunities())
             elif path == "/api/rumors/clusters":
                 self.json(list_rumor_clusters())
             elif path == "/api/sync/status":
@@ -107,6 +111,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.json(create_resource_event(body), 201)
             elif path == "/api/routes/alerts":
                 self.json(create_route_alert(body), 201)
+            elif path == "/api/work/opportunities":
+                self.json(create_opportunity(body), 201)
             elif path == "/api/rumors":
                 self.json(create_rumor(body), 201)
             elif path == "/api/sync/run":

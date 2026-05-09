@@ -213,6 +213,30 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(listed["alerts"][0]["id"], created["id"])
         self.assertIn("[redacted-location]", listed["alerts"][0]["note"])
 
+    def test_work_opportunity_endpoints_create_and_list_opportunities(self):
+        with isolated_core_db(self.tmp.name):
+            post = FakeHandler(
+                path="/api/work/opportunities",
+                body={
+                    "title": "Solar charging steward",
+                    "skill_category": "solar",
+                    "rough_location": "Central market",
+                    "verification_status": "steward_checked",
+                    "safety_note": "Community steward verified.",
+                },
+            )
+            server.Handler.do_POST(post)
+            handler = FakeHandler(path="/api/work/opportunities")
+
+            server.Handler.do_GET(handler)
+
+        created = json.loads(post.wfile.getvalue())
+        listed = json.loads(handler.wfile.getvalue())
+        self.assertEqual(post.status, 201)
+        self.assertEqual(handler.status, 200)
+        self.assertEqual(listed[0]["id"], created["id"])
+        self.assertEqual(listed[0]["skill_category"], "solar")
+
 
 class FakeHandler:
     body = server.Handler.body
