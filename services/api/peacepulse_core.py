@@ -12,6 +12,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT / "data"
 DB_PATH = DATA_DIR / "peacepulse.db"
+ALLOWED_LANGUAGES = {"en", "sw", "fr", "ar"}
+MAX_REPORT_TEXT_LENGTH = 2000
 
 REPORT_CATEGORIES = {
     "resource": ["water", "queue", "pump", "food", "stock", "clinic", "distribution", "solar"],
@@ -83,19 +85,32 @@ def rows(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
         return [dict(row) for row in con.execute(sql, params).fetchall()]
 
 
+def public_report(report: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in report.items() if key != "text"}
+
+
 def create_report(data: dict[str, Any], con: sqlite3.Connection | None = None) -> dict[str, Any]:
     owns = con is None
     con = con or connect()
+    language = str(data.get("language") or "en")[:12]
+    category_hint = str(data.get("category_hint") or "")[:40]
+    text = str(data.get("text") or "").strip()
+    if language not in ALLOWED_LANGUAGES:
+        raise ValueError("Invalid language.")
+    if category_hint and category_hint not in REPORT_CATEGORIES:
+        raise ValueError("Invalid concern type.")
+    if len(text) < 8:
+        raise ValueError("Report text must be at least 8 characters.")
+    if len(text) > MAX_REPORT_TEXT_LENGTH:
+        raise ValueError("Report text must be 2,000 characters or fewer.")
     report = {
         "id": new_id("rep"),
         "created_at": now(),
-        "language": str(data.get("language") or "en")[:12],
+        "language": language,
         "rough_location": str(data.get("rough_location") or "unspecified")[:80],
-        "category_hint": str(data.get("category_hint") or "")[:40],
-        "text": str(data.get("text") or "").strip(),
+        "category_hint": category_hint,
+        "text": text,
     }
-    if len(report["text"]) < 8:
-        raise ValueError("Report text must be at least 8 characters.")
     con.execute(
         """
         INSERT INTO reports (id, created_at, language, rough_location, category_hint, text)

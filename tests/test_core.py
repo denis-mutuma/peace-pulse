@@ -40,6 +40,26 @@ class CoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Report text must be at least 8 characters."):
             core.create_report({"text": "short"})
 
+    def test_long_report_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Report text must be 2,000 characters or fewer."):
+            core.create_report({"text": "x" * 2001})
+
+    def test_invalid_language_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Invalid language."):
+            core.create_report({"language": "de", "text": "Families need help at the water queue."})
+
+    def test_invalid_category_hint_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Invalid concern type."):
+            core.create_report({"category_hint": "gossip", "text": "Families need help at the water queue."})
+
+    def test_public_report_omits_raw_text(self):
+        report = core.create_report({"text": "Families need help at the water queue."})
+
+        public = core.public_report(report)
+
+        self.assertNotIn("text", public)
+        self.assertEqual(public["id"], report["id"])
+
     def test_list_incidents_omits_original_report_text(self):
         sensitive_text = "Mr. Kamau says call +254 700 000 000 about the blocked clinic queue."
         report = core.create_report(

@@ -11,6 +11,7 @@ from peacepulse_core import (
     create_report,
     init_db,
     list_incidents,
+    public_report,
     triage_report,
     update_incident_status,
 )
@@ -53,7 +54,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/reports":
                 report = create_report(body)
                 incident = triage_report(report["id"])
-                self.json({"report": report, "incident": incident}, 201)
+                self.json({"report": public_report(report), "incident": incident}, 201)
             else:
                 self.error(404, "Route not found.")
         except ValueError as exc:
