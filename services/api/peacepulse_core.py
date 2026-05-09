@@ -257,6 +257,35 @@ def seed_demo(con: sqlite3.Connection) -> None:
     )
 
 
+def reset_demo_data() -> dict[str, Any]:
+    init_db()
+    with connect() as con:
+        for table in [
+            "sync_queue",
+            "custody_events",
+            "evidence",
+            "incident_notes",
+            "status_events",
+            "incidents",
+            "reports",
+            "resource_events",
+            "rumors",
+        ]:
+            con.execute(f"DELETE FROM {table}")
+        seed_demo(con)
+    for path in EVIDENCE_DIR.glob("*.bin"):
+        path.unlink(missing_ok=True)
+    return {
+        "reset": True,
+        "seeded": {
+            "reports": len(rows("SELECT id FROM reports")),
+            "incidents": len(rows("SELECT id FROM incidents")),
+            "resources": len(rows("SELECT id FROM resource_events")),
+            "rumors": len(rows("SELECT id FROM rumors")),
+        },
+    }
+
+
 def public_report(report: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in report.items() if key != "text"}
 

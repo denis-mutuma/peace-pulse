@@ -75,6 +75,18 @@ class ApiRouteTests(unittest.TestCase):
         self.assertIn("counts", payload)
         self.assertIn("Raw evidence file bytes.", payload["never_syncs"])
 
+    def test_demo_reset_endpoint_reseeds_data(self):
+        with isolated_core_db(self.tmp.name):
+            core.create_report({"text": "A temporary report should be removed by reset."})
+            handler = FakeHandler(path="/api/demo/reset", body={})
+
+            server.Handler.do_POST(handler)
+
+        payload = json.loads(handler.wfile.getvalue())
+        self.assertEqual(handler.status, 200)
+        self.assertTrue(payload["reset"])
+        self.assertEqual(payload["seeded"]["reports"], 2)
+
     def test_post_report_returns_201_without_raw_text(self):
         with isolated_core_db(self.tmp.name):
             sensitive_text = "Mr. Kamau says call +254 700 000 000 about blocked water access."

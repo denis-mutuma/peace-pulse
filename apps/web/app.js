@@ -241,6 +241,21 @@ function resetDemoLog() {
   renderDemoLog();
 }
 
+async function resetDemoData() {
+  try {
+    const result = await api("/api/demo/reset", { method: "POST", body: {} });
+    localStorage.removeItem("peacepulse-report-queue");
+    state.demoLog = [];
+    localStorage.removeItem("peacepulse-demo-log");
+    updateQueueCount();
+    renderDemoLog();
+    setDemoResult(`Demo reset with ${result.seeded.reports} reports and ${result.seeded.incidents} incidents.`);
+    await refreshAll();
+  } catch (error) {
+    setDemoResult(error.message);
+  }
+}
+
 function renderDemoLog() {
   $("#demoLog").innerHTML = state.demoLog.map((item) => `
     <p><strong>${escapeHtml(item.action)}</strong> ${escapeHtml(item.message)}<br>${new Date(item.created_at).toLocaleString()}</p>
@@ -634,6 +649,7 @@ function bind() {
   $("#runSync").addEventListener("click", runSync);
   $("#refreshPrivacy").addEventListener("click", loadPrivacyAudit);
   $("#resetDemo").addEventListener("click", resetDemoLog);
+  $("#resetDemoData").addEventListener("click", resetDemoData);
   $$("[data-demo-action]").forEach((button) => {
     button.addEventListener("click", () => runDemoStep(button.dataset.demoAction));
   });

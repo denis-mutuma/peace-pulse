@@ -24,6 +24,7 @@ from peacepulse_core import (
     list_status_history,
     public_report,
     privacy_audit,
+    reset_demo_data,
     resource_status,
     run_sync,
     sync_preview,
@@ -104,6 +105,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.json(create_rumor(body), 201)
             elif path == "/api/sync/run":
                 self.json(run_sync())
+            elif path == "/api/demo/reset":
+                self.json(reset_demo_data())
             else:
                 self.error(404, "Route not found.")
         except ValueError as exc:

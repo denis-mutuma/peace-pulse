@@ -135,6 +135,24 @@ class CoreTests(unittest.TestCase):
         self.assertIn("Raw evidence file bytes.", audit["never_syncs"])
         self.assertGreaterEqual(audit["raw_report_records"], 1)
 
+    def test_reset_demo_data_replaces_existing_records(self):
+        core.create_report({"text": "A temporary report should be removed by reset."})
+        core.create_evidence(
+            {
+                "filename": "note.txt",
+                "mime_type": "text/plain",
+                "content_base64": base64.b64encode(b"demo").decode("ascii"),
+            }
+        )
+
+        result = core.reset_demo_data()
+
+        report_texts = [item["text"] for item in core.rows("SELECT text FROM reports")]
+        self.assertTrue(result["reset"])
+        self.assertEqual(result["seeded"]["reports"], 2)
+        self.assertFalse(any("temporary" in text.lower() for text in report_texts))
+        self.assertEqual(list(core.EVIDENCE_DIR.glob("*.bin")), [])
+
     def test_incident_status_can_be_updated(self):
         report = core.create_report(
             {

@@ -200,6 +200,13 @@ textarea {
   margin-top: 1rem;
 }
 
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
 .filters {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

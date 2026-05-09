@@ -47,6 +47,43 @@ uv run python -m unittest discover -s tests
 
 See [Manual Test Checklist](docs/manual-test.md) for a fuller smoke test.
 
+## Demo Reset
+
+The Demo tab includes a reset action for rehearsals and presentations. It clears runtime records, removes stored evidence binaries, clears the browser-side scenario log, and reseeds the water-point scenario.
+
+Use reset when:
+
+- A judge or reviewer asks to see the flow from the beginning.
+- The browser offline queue contains old demo submissions.
+- Sync counts or incident cards are cluttered from prior rehearsals.
+- You want the dashboard to return to the same predictable seeded story.
+
+The reset is intentionally local to the prototype runtime. It does not alter source files, git history, deployment configuration, or application code.
+
+For scripted rehearsals, the same reset is available through the local API:
+
+```bash
+curl -X POST http://localhost:8080/api/demo/reset
+```
+
+The response includes the number of seeded reports, incidents, resource events, and rumor records. After calling it, refresh the browser so every tab reloads the seeded state.
+
+Reset safety notes:
+
+- Use it only for demo data, not for real submissions.
+- It removes local evidence binaries created during rehearsal.
+- It clears queued browser submissions from the current browser session.
+- It preserves the codebase and deployment settings.
+- It gives every presentation the same starting state.
+
+Recommended rehearsal order after reset:
+
+1. Run the guided scenario.
+2. Add one mediation note.
+3. Open the privacy audit.
+4. Run coordinator sync.
+5. Confirm the sync preview is redacted.
+
 ## Services
 
 - `apps/web`: static offline-first PWA.
