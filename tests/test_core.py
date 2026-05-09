@@ -113,9 +113,65 @@ class CoreTests(unittest.TestCase):
 
         self.assertEqual(updated["status"], "in_progress")
 
+    def test_status_change_creates_history_event(self):
+        report = core.create_report(
+            {
+                "language": "en",
+                "rough_location": "Main water point",
+                "category_hint": "resource",
+                "text": "Families are turned away after long water queues.",
+            }
+        )
+        incident = core.triage_report(report["id"])
+
+        core.update_incident_status(incident["id"], "assigned", "shift lead")
+
+        history = core.list_status_history(incident["id"])
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]["previous_status"], "new")
+        self.assertEqual(history[0]["new_status"], "assigned")
+        self.assertEqual(history[0]["actor_label"], "shift lead")
+
     def test_invalid_incident_status_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "Invalid status."):
             core.update_incident_status("inc_missing", "closed")
+
+    def test_invalid_status_does_not_create_history_event(self):
+        report = core.create_report(
+            {
+                "language": "en",
+                "rough_location": "Main water point",
+                "category_hint": "resource",
+                "text": "Families are turned away after long water queues.",
+            }
+        )
+        incident = core.triage_report(report["id"])
+
+        with self.assertRaisesRegex(ValueError, "Invalid status."):
+            core.update_incident_status(incident["id"], "closed")
+
+        self.assertEqual(core.list_status_history(incident["id"]), [])
+
+    def test_purge_triaged_report_text_keeps_incident_available(self):
+        sensitive_text = "Mr. Kamau says call +254 700 000 000 about the blocked clinic queue."
+        report = core.create_report(
+            {
+                "language": "en",
+                "rough_location": "Main water point",
+                "category_hint": "resource",
+                "text": sensitive_text,
+            }
+        )
+        core.triage_report(report["id"])
+
+        purged = core.purge_triaged_report_text()
+
+        stored = core.rows("SELECT text, redacted_text FROM reports WHERE id = ?", (report["id"],))[0]
+        incident = next(item for item in core.list_incidents() if item["report_id"] == report["id"])
+        self.assertEqual(purged, 1)
+        self.assertEqual(stored["text"], "")
+        self.assertNotEqual(stored["redacted_text"], "")
+        self.assertIn("[redacted-name]", incident["redacted_text"])
 
 
 if __name__ == "__main__":

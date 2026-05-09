@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 import time
@@ -11,7 +12,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT / "data"
-DB_PATH = DATA_DIR / "peacepulse.db"
+DB_PATH = Path(os.environ.get("PEACEPULSE_DB_PATH", DATA_DIR / "peacepulse.db"))
 ALLOWED_LANGUAGES = {"en", "sw", "fr", "ar"}
 MAX_REPORT_TEXT_LENGTH = 2000
 
@@ -62,6 +63,7 @@ def init_db() -> None:
                 rough_location TEXT NOT NULL,
                 category_hint TEXT,
                 text TEXT NOT NULL,
+                redacted_text TEXT NOT NULL DEFAULT '',
                 status TEXT NOT NULL DEFAULT 'queued'
             );
 
@@ -78,8 +80,20 @@ def init_db() -> None:
                 status TEXT NOT NULL DEFAULT 'new',
                 public_update TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS status_events (
+                id TEXT PRIMARY KEY,
+                incident_id TEXT NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
+                created_at TEXT NOT NULL,
+                previous_status TEXT NOT NULL,
+                new_status TEXT NOT NULL,
+                actor_label TEXT NOT NULL
+            );
             """
         )
+        columns = {row["name"] for row in con.execute("PRAGMA table_info(reports)").fetchall()}
+        if "redacted_text" not in columns:
+            con.execute("ALTER TABLE reports ADD COLUMN redacted_text TEXT NOT NULL DEFAULT ''")
 
 
 def rows(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
@@ -118,11 +132,12 @@ def create_report(data: dict[str, Any], con: sqlite3.Connection | None = None) -
         "rough_location": str(data.get("rough_location") or "unspecified")[:80],
         "category_hint": category_hint,
         "text": text,
+        "redacted_text": redact(text),
     }
     con.execute(
         """
-        INSERT INTO reports (id, created_at, language, rough_location, category_hint, text)
-        VALUES (:id, :created_at, :language, :rough_location, :category_hint, :text)
+        INSERT INTO reports (id, created_at, language, rough_location, category_hint, text, redacted_text)
+        VALUES (:id, :created_at, :language, :rough_location, :category_hint, :text, :redacted_text)
         """,
         report,
     )
@@ -244,13 +259,47 @@ def list_incidents() -> list[dict[str, Any]]:
     return items
 
 
-def update_incident_status(incident_id: str, status: str) -> dict[str, Any]:
+def list_status_history(incident_id: str) -> list[dict[str, Any]]:
+    return rows(
+        """
+        SELECT *
+        FROM status_events
+        WHERE incident_id = ?
+        ORDER BY created_at, id
+        """,
+        (incident_id,),
+    )
+
+
+def update_incident_status(incident_id: str, status: str, actor_label: str = "responder") -> dict[str, Any]:
     allowed = {"new", "assigned", "in_progress", "resolved"}
     if status not in allowed:
         raise ValueError("Invalid status.")
     with connect() as con:
-        con.execute("UPDATE incidents SET status = ? WHERE id = ?", (status, incident_id))
         row = con.execute("SELECT * FROM incidents WHERE id = ?", (incident_id,)).fetchone()
         if not row:
             raise ValueError("Incident not found.")
-        return dict(row)
+        previous_status = row["status"]
+        if previous_status != status:
+            con.execute("UPDATE incidents SET status = ? WHERE id = ?", (status, incident_id))
+            con.execute(
+                """
+                INSERT INTO status_events (id, incident_id, created_at, previous_status, new_status, actor_label)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (new_id("ste"), incident_id, now(), previous_status, status, actor_label[:80] or "responder"),
+            )
+        updated = con.execute("SELECT * FROM incidents WHERE id = ?", (incident_id,)).fetchone()
+        return dict(updated)
+
+
+def purge_triaged_report_text() -> int:
+    with connect() as con:
+        result = con.execute(
+            """
+            UPDATE reports
+            SET text = ''
+            WHERE status = 'triaged' AND text != ''
+            """
+        )
+        return result.rowcount
