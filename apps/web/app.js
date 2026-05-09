@@ -58,7 +58,6 @@ async function submitReport(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const payload = formData(form);
-  payload.consent_to_sync = form.elements.consent_to_sync.checked;
   try {
     const result = await api("/api/reports", { method: "POST", body: payload });
     setResult(`Submitted and triaged as ${result.incident.category} with severity ${result.incident.severity}.`);
@@ -124,91 +123,8 @@ async function loadIncidents() {
   renderIncidents(await api("/api/incidents"));
 }
 
-async function uploadEvidence(event) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const file = form.elements.file.files[0];
-  if (!file) return;
-  const content_base64 = await readAsDataUrl(file);
-  await api("/api/evidence", {
-    method: "POST",
-    body: {
-      filename: file.name,
-      mime_type: file.type || "application/octet-stream",
-      content_base64,
-      sync_allowed: form.elements.sync_allowed.checked,
-    },
-  });
-  form.reset();
-  await loadEvidence();
-}
-
-async function loadEvidence() {
-  const items = await api("/api/evidence");
-  $("#evidenceList").innerHTML = items.map((item) => `
-    <article class="card">
-      <h3>${escapeHtml(item.filename)}</h3>
-      <span class="badge">${item.size_bytes} bytes</span>
-      <p><strong>SHA-256:</strong> ${item.sha256.slice(0, 24)}...</p>
-      <p>${item.custody.map((event) => escapeHtml(event.action)).join("<br>")}</p>
-    </article>
-  `).join("");
-}
-
-async function simulateSensor() {
-  const queue_length = Math.floor(10 + Math.random() * 58);
-  const flow_rate = Number((Math.random() * 9).toFixed(1));
-  const uptime = flow_rate < 1.2 ? 0 : 1;
-  await api("/api/sensor-events", {
-    method: "POST",
-    body: { resource_id: "water-point-north", queue_length, flow_rate, uptime },
-  });
-  await loadResources();
-}
-
-async function loadResources() {
-  const items = await api("/api/resources/status");
-  $("#resourceGrid").innerHTML = items.map((item) => `
-    <article class="card">
-      <h3>${escapeHtml(item.resource_id)}</h3>
-      <span class="badge ${item.anomaly === "normal" ? "" : "risk"}">${escapeHtml(item.anomaly)}</span>
-      <p>Queue: ${item.queue_length}</p>
-      <p>Flow: ${item.flow_rate}</p>
-      <p>Uptime: ${item.uptime ? "online" : "offline"}</p>
-    </article>
-  `).join("");
-}
-
-async function submitRumor(event) {
-  event.preventDefault();
-  await api("/api/rumors", { method: "POST", body: formData(event.currentTarget) });
-  await loadRumors();
-}
-
-async function loadRumors() {
-  const clusters = await api("/api/rumors/clusters");
-  $("#rumorGrid").innerHTML = clusters.map((cluster) => `
-    <article class="card">
-      <h3>${escapeHtml(cluster.cluster_key)}</h3>
-      <span class="badge risk">Max severity ${cluster.max_severity}</span>
-      <span class="badge">${cluster.count} report${cluster.count === 1 ? "" : "s"}</span>
-      ${cluster.items.map((item) => `<p>${escapeHtml(item.text)}</p>`).join("")}
-    </article>
-  `).join("");
-}
-
-async function loadSync() {
-  const status = await api("/api/sync/status");
-  $("#syncStatus").textContent = `${status.pending || 0} pending, ${status.synced || 0} synced`;
-}
-
-async function runSync() {
-  await api("/api/sync/run", { method: "POST", body: {} });
-  await loadSync();
-}
-
 async function refreshAll() {
-  await Promise.allSettled([loadIncidents(), loadEvidence(), loadResources(), loadRumors(), loadSync(), checkHub()]);
+  await Promise.allSettled([loadIncidents(), checkHub()]);
 }
 
 async function checkHub() {
@@ -257,10 +173,6 @@ function bind() {
   $("#reportForm").addEventListener("submit", submitReport);
   $("#flushQueue").addEventListener("click", flushQueue);
   $("#refreshDashboard").addEventListener("click", refreshAll);
-  $("#evidenceForm").addEventListener("submit", uploadEvidence);
-  $("#simulateSensor").addEventListener("click", simulateSensor);
-  $("#rumorForm").addEventListener("submit", submitRumor);
-  $("#runSync").addEventListener("click", runSync);
 }
 
 if ("serviceWorker" in navigator) {
