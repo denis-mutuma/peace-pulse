@@ -1,5 +1,6 @@
 const state = {
   offline: localStorage.getItem("peacepulse-offline") === "true",
+  role: localStorage.getItem("peacepulse-role") || "community",
   incidents: [],
 };
 
@@ -171,8 +172,100 @@ async function loadIncidents() {
   renderIncidents(state.incidents);
 }
 
+async function uploadEvidence(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const file = form.elements.file.files[0];
+  if (!file) return;
+  const content_base64 = await readAsDataUrl(file);
+  await api("/api/evidence", {
+    method: "POST",
+    body: {
+      filename: file.name,
+      mime_type: file.type || "application/octet-stream",
+      content_base64,
+      sync_allowed: form.elements.sync_allowed.checked,
+    },
+  });
+  form.reset();
+  await loadEvidence();
+}
+
+async function loadEvidence() {
+  const items = await api("/api/evidence");
+  $("#evidenceList").innerHTML = items.map((item) => `
+    <article class="card">
+      <h3>${escapeHtml(item.filename)}</h3>
+      <span class="badge">${item.size_bytes} bytes</span>
+      <span class="badge">${item.sync_allowed ? "sync allowed" : "local only"}</span>
+      <p><strong>SHA-256:</strong> ${escapeHtml(item.sha256.slice(0, 24))}...</p>
+      <p>${item.custody.map((event) => escapeHtml(event.action)).join("<br>")}</p>
+    </article>
+  `).join("") || `<p class="empty">No evidence records yet.</p>`;
+}
+
+async function simulateSensor() {
+  const queue_length = Math.floor(10 + Math.random() * 58);
+  const flow_rate = Number((Math.random() * 9).toFixed(1));
+  const uptime = flow_rate < 1.2 ? 0 : 1;
+  await api("/api/sensor-events", {
+    method: "POST",
+    body: {
+      resource_id: "water-point-north",
+      queue_length,
+      flow_rate,
+      uptime,
+      maintenance_note: uptime ? "" : "Pump inspection requested",
+    },
+  });
+  await loadResources();
+}
+
+async function loadResources() {
+  const items = await api("/api/resources/status");
+  $("#resourceGrid").innerHTML = items.map((item) => `
+    <article class="card">
+      <h3>${escapeHtml(item.resource_id)}</h3>
+      <span class="badge ${item.anomaly === "normal" ? "" : "risk"}">${escapeHtml(item.anomaly)}</span>
+      <p>Queue: ${item.queue_length}</p>
+      <p>Flow: ${item.flow_rate}</p>
+      <p>Uptime: ${item.uptime ? "online" : "offline"}</p>
+      <p>${escapeHtml(item.maintenance_note || "No maintenance note")}</p>
+    </article>
+  `).join("") || `<p class="empty">No resource events yet.</p>`;
+}
+
+async function submitRumor(event) {
+  event.preventDefault();
+  await api("/api/rumors", { method: "POST", body: formData(event.currentTarget) });
+  event.currentTarget.reset();
+  await loadRumors();
+}
+
+async function loadRumors() {
+  const clusters = await api("/api/rumors/clusters");
+  $("#rumorGrid").innerHTML = clusters.map((cluster) => `
+    <article class="card">
+      <h3>${escapeHtml(cluster.cluster_key)}</h3>
+      <span class="badge risk">Max severity ${cluster.max_severity}</span>
+      <span class="badge">${cluster.count} report${cluster.count === 1 ? "" : "s"}</span>
+      ${cluster.items.map((item) => `<p>${escapeHtml(item.redacted_text)}<br><strong>Response:</strong> ${escapeHtml(item.response_notes || "Needs steward review")}</p>`).join("")}
+    </article>
+  `).join("") || `<p class="empty">No rumor clusters yet.</p>`;
+}
+
+async function loadSync() {
+  const status = await api("/api/sync/status");
+  $("#syncStatus").textContent = `${status.pending || 0} pending, ${status.synced || 0} synced`;
+}
+
+async function runSync() {
+  await api("/api/sync/run", { method: "POST", body: {} });
+  await loadSync();
+}
+
 async function refreshAll() {
-  await Promise.allSettled([loadIncidents(), checkHub()]);
+  await Promise.allSettled([loadIncidents(), loadEvidence(), loadResources(), loadRumors(), loadSync(), checkHub()]);
 }
 
 async function checkHub() {
@@ -184,6 +277,24 @@ async function checkHub() {
     $("#apiStatus").textContent = "Offline demo mode";
   }
   $("#offlineToggle").textContent = state.offline ? "Go online" : "Go offline";
+}
+
+function readAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function applyRole() {
+  $("#roleSelect").value = state.role;
+  $$("[data-role]").forEach((item) => {
+    const required = item.dataset.role;
+    const visible = state.role === required || (required === "steward" && state.role === "coordinator");
+    item.hidden = !visible;
+  });
 }
 
 function escapeHtml(value) {
@@ -209,9 +320,18 @@ function bind() {
     localStorage.setItem("peacepulse-offline", state.offline);
     checkHub();
   });
+  $("#roleSelect").addEventListener("change", () => {
+    state.role = $("#roleSelect").value;
+    localStorage.setItem("peacepulse-role", state.role);
+    applyRole();
+  });
   $("#reportForm").addEventListener("submit", submitReport);
   $("#flushQueue").addEventListener("click", flushQueue);
   $("#refreshDashboard").addEventListener("click", refreshAll);
+  $("#evidenceForm").addEventListener("submit", uploadEvidence);
+  $("#simulateSensor").addEventListener("click", simulateSensor);
+  $("#rumorForm").addEventListener("submit", submitRumor);
+  $("#runSync").addEventListener("click", runSync);
   $("#reportForm").addEventListener("input", () => {
     setResult("");
     updateTextCount();
@@ -229,6 +349,7 @@ if ("serviceWorker" in navigator) {
 }
 
 bind();
+applyRole();
 updateQueueCount();
 updateTextCount();
 refreshAll();
