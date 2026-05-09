@@ -8,20 +8,9 @@ from urllib.parse import urlparse
 
 from peacepulse_core import (
     ROOT,
-    add_note,
-    create_evidence,
     create_report,
-    create_resource_event,
-    create_rumor,
     init_db,
-    list_evidence,
     list_incidents,
-    list_reports,
-    list_rumor_clusters,
-    resource_status,
-    run_sync,
-    sync_status,
-    triage_pending,
     triage_report,
     update_incident_status,
 )
@@ -48,18 +37,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/health":
                 self.json({"ok": True, "service": "peacepulse-edge"})
-            elif path == "/api/reports":
-                self.json(list_reports())
             elif path == "/api/incidents":
                 self.json(list_incidents())
-            elif path == "/api/evidence":
-                self.json(list_evidence())
-            elif path == "/api/rumors/clusters":
-                self.json(list_rumor_clusters())
-            elif path == "/api/resources/status":
-                self.json(resource_status())
-            elif path == "/api/sync/status":
-                self.json(sync_status())
             else:
                 self.static(path)
         except Exception as exc:
@@ -73,19 +52,6 @@ class Handler(BaseHTTPRequestHandler):
                 report = create_report(body)
                 incident = triage_report(report["id"])
                 self.json({"report": report, "incident": incident}, 201)
-            elif path.endswith("/notes") and path.startswith("/api/incidents/"):
-                incident_id = path.split("/")[3]
-                self.json(add_note(incident_id, body.get("text", ""), body.get("author_role", "steward")), 201)
-            elif path == "/api/evidence":
-                self.json(create_evidence(body), 201)
-            elif path == "/api/rumors":
-                self.json(create_rumor(body), 201)
-            elif path == "/api/sensor-events":
-                self.json(create_resource_event(body), 201)
-            elif path == "/api/sync/run":
-                self.json(run_sync())
-            elif path == "/api/worker/triage":
-                self.json({"processed": triage_pending()})
             else:
                 self.error(404, "Route not found.")
         except ValueError as exc:

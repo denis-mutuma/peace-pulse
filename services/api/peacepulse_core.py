@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import base64
-import hashlib
 import json
-import os
 import re
 import sqlite3
 import time
@@ -15,7 +12,6 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT / "data"
 DB_PATH = DATA_DIR / "peacepulse.db"
-EVIDENCE_DIR = DATA_DIR / "storage" / "evidence"
 
 REPORT_CATEGORIES = {
     "resource": ["water", "queue", "pump", "food", "stock", "clinic", "distribution", "solar"],
@@ -45,7 +41,6 @@ def new_id(prefix: str) -> str:
 
 def connect() -> sqlite3.Connection:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
@@ -63,7 +58,6 @@ def init_db() -> None:
                 rough_location TEXT NOT NULL,
                 category_hint TEXT,
                 text TEXT NOT NULL,
-                consent_to_sync INTEGER NOT NULL DEFAULT 0,
                 status TEXT NOT NULL DEFAULT 'queued'
             );
 
@@ -80,103 +74,8 @@ def init_db() -> None:
                 status TEXT NOT NULL DEFAULT 'new',
                 public_update TEXT NOT NULL
             );
-
-            CREATE TABLE IF NOT EXISTS notes (
-                id TEXT PRIMARY KEY,
-                incident_id TEXT NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
-                created_at TEXT NOT NULL,
-                author_role TEXT NOT NULL,
-                text TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS evidence (
-                id TEXT PRIMARY KEY,
-                created_at TEXT NOT NULL,
-                filename TEXT NOT NULL,
-                mime_type TEXT NOT NULL,
-                sha256 TEXT NOT NULL,
-                size_bytes INTEGER NOT NULL,
-                encrypted_path TEXT NOT NULL,
-                linked_report_id TEXT,
-                sync_allowed INTEGER NOT NULL DEFAULT 0
-            );
-
-            CREATE TABLE IF NOT EXISTS custody_events (
-                id TEXT PRIMARY KEY,
-                evidence_id TEXT NOT NULL REFERENCES evidence(id) ON DELETE CASCADE,
-                created_at TEXT NOT NULL,
-                actor_role TEXT NOT NULL,
-                action TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS rumors (
-                id TEXT PRIMARY KEY,
-                created_at TEXT NOT NULL,
-                language TEXT NOT NULL,
-                rough_location TEXT NOT NULL,
-                text TEXT NOT NULL,
-                severity INTEGER NOT NULL,
-                cluster_key TEXT NOT NULL,
-                response_notes TEXT NOT NULL DEFAULT ''
-            );
-
-            CREATE TABLE IF NOT EXISTS resource_events (
-                id TEXT PRIMARY KEY,
-                created_at TEXT NOT NULL,
-                resource_id TEXT NOT NULL,
-                queue_length INTEGER NOT NULL,
-                flow_rate REAL NOT NULL,
-                uptime INTEGER NOT NULL,
-                anomaly TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS sync_queue (
-                id TEXT PRIMARY KEY,
-                created_at TEXT NOT NULL,
-                item_type TEXT NOT NULL,
-                item_id TEXT NOT NULL,
-                payload TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'pending',
-                synced_at TEXT
-            );
             """
         )
-        if con.execute("SELECT COUNT(*) FROM reports").fetchone()[0] == 0:
-            seed_demo(con)
-
-
-def seed_demo(con: sqlite3.Connection) -> None:
-    samples = [
-        {
-            "language": "en",
-            "rough_location": "North water point",
-            "category_hint": "resource",
-            "text": "There is tension at the main water point because some families are being turned away after long queues.",
-        },
-        {
-            "language": "sw",
-            "rough_location": "North water point",
-            "category_hint": "rumor",
-            "text": "People say aid is being diverted and one group gets water first.",
-        },
-    ]
-    for sample in samples:
-        report = create_report(sample, con=con)
-        triage_report(report["id"], con=con)
-    for queue_length, flow_rate, uptime in [(12, 8.5, 1), (44, 2.1, 1), (59, 0.2, 0)]:
-        create_resource_event(
-            {
-                "resource_id": "water-point-north",
-                "queue_length": queue_length,
-                "flow_rate": flow_rate,
-                "uptime": uptime,
-            },
-            con=con,
-        )
-
-
-def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
-    return dict(row) if row else None
 
 
 def rows(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
@@ -187,29 +86,27 @@ def rows(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
 def create_report(data: dict[str, Any], con: sqlite3.Connection | None = None) -> dict[str, Any]:
     owns = con is None
     con = con or connect()
-    report_id = new_id("rep")
-    payload = {
-        "id": report_id,
+    report = {
+        "id": new_id("rep"),
         "created_at": now(),
         "language": str(data.get("language") or "en")[:12],
         "rough_location": str(data.get("rough_location") or "unspecified")[:80],
         "category_hint": str(data.get("category_hint") or "")[:40],
         "text": str(data.get("text") or "").strip(),
-        "consent_to_sync": 1 if data.get("consent_to_sync") else 0,
     }
-    if len(payload["text"]) < 8:
+    if len(report["text"]) < 8:
         raise ValueError("Report text must be at least 8 characters.")
     con.execute(
         """
-        INSERT INTO reports (id, created_at, language, rough_location, category_hint, text, consent_to_sync)
-        VALUES (:id, :created_at, :language, :rough_location, :category_hint, :text, :consent_to_sync)
+        INSERT INTO reports (id, created_at, language, rough_location, category_hint, text)
+        VALUES (:id, :created_at, :language, :rough_location, :category_hint, :text)
         """,
-        payload,
+        report,
     )
     if owns:
         con.commit()
         con.close()
-    return payload
+    return report
 
 
 def classify(text: str, hint: str = "") -> tuple[str, float]:
@@ -305,34 +202,10 @@ def triage_report(report_id: str, con: sqlite3.Connection | None = None) -> dict
         incident,
     )
     con.execute("UPDATE reports SET status = 'triaged' WHERE id = ?", (report_id,))
-    if report["consent_to_sync"]:
-        enqueue_sync(con, "incident_summary", incident["id"], incident)
     if owns:
         con.commit()
         con.close()
     return incident
-
-
-def triage_pending(limit: int = 20) -> int:
-    count = 0
-    with connect() as con:
-        for row in con.execute("SELECT id FROM reports WHERE status = 'queued' ORDER BY created_at LIMIT ?", (limit,)):
-            triage_report(row["id"], con=con)
-            count += 1
-    return count
-
-
-def list_reports() -> list[dict[str, Any]]:
-    items = rows(
-        """
-        SELECT id, created_at, category_hint, status, text
-        FROM reports
-        ORDER BY created_at DESC
-        """
-    )
-    for item in items:
-        item["redacted_text"] = redact(item.pop("text"))
-    return items
 
 
 def list_incidents() -> list[dict[str, Any]]:
@@ -358,203 +231,3 @@ def update_incident_status(incident_id: str, status: str) -> dict[str, Any]:
         if not row:
             raise ValueError("Incident not found.")
         return dict(row)
-
-
-def add_note(incident_id: str, text: str, author_role: str = "steward") -> dict[str, Any]:
-    note = {
-        "id": new_id("note"),
-        "incident_id": incident_id,
-        "created_at": now(),
-        "author_role": author_role,
-        "text": text.strip(),
-    }
-    if len(note["text"]) < 2:
-        raise ValueError("Note text is required.")
-    with connect() as con:
-        con.execute(
-            "INSERT INTO notes (id, incident_id, created_at, author_role, text) VALUES (:id, :incident_id, :created_at, :author_role, :text)",
-            note,
-        )
-    return note
-
-
-def xor_bytes(data: bytes) -> bytes:
-    key = hashlib.sha256(b"peacepulse-demo-local-key").digest()
-    return bytes(byte ^ key[index % len(key)] for index, byte in enumerate(data))
-
-
-def create_evidence(data: dict[str, Any]) -> dict[str, Any]:
-    raw_b64 = data.get("content_base64") or ""
-    if "," in raw_b64:
-        raw_b64 = raw_b64.split(",", 1)[1]
-    raw = base64.b64decode(raw_b64)
-    if not raw:
-        raise ValueError("Evidence content is required.")
-    evidence_id = new_id("evd")
-    filename = os.path.basename(str(data.get("filename") or "evidence.bin"))[:120]
-    digest = hashlib.sha256(raw).hexdigest()
-    encrypted_path = EVIDENCE_DIR / f"{evidence_id}.bin"
-    encrypted_path.write_bytes(xor_bytes(raw))
-    try:
-        stored_path = str(encrypted_path.relative_to(ROOT))
-    except ValueError:
-        stored_path = str(encrypted_path)
-    record = {
-        "id": evidence_id,
-        "created_at": now(),
-        "filename": filename,
-        "mime_type": str(data.get("mime_type") or "application/octet-stream")[:120],
-        "sha256": digest,
-        "size_bytes": len(raw),
-        "encrypted_path": stored_path,
-        "linked_report_id": data.get("linked_report_id") or "",
-        "sync_allowed": 1 if data.get("sync_allowed") else 0,
-    }
-    with connect() as con:
-        con.execute(
-            """
-            INSERT INTO evidence
-            (id, created_at, filename, mime_type, sha256, size_bytes, encrypted_path, linked_report_id, sync_allowed)
-            VALUES (:id, :created_at, :filename, :mime_type, :sha256, :size_bytes, :encrypted_path, :linked_report_id, :sync_allowed)
-            """,
-            record,
-        )
-        event = {
-            "id": new_id("coe"),
-            "evidence_id": evidence_id,
-            "created_at": now(),
-            "actor_role": "community_submitter",
-            "action": "uploaded, hashed, and locally encrypted",
-        }
-        con.execute(
-            "INSERT INTO custody_events (id, evidence_id, created_at, actor_role, action) VALUES (:id, :evidence_id, :created_at, :actor_role, :action)",
-            event,
-        )
-        if record["sync_allowed"]:
-            enqueue_sync(con, "evidence_record", evidence_id, {k: v for k, v in record.items() if k != "encrypted_path"})
-    return record
-
-
-def list_evidence() -> list[dict[str, Any]]:
-    items = rows("SELECT * FROM evidence ORDER BY created_at DESC")
-    for item in items:
-        item["custody"] = rows("SELECT * FROM custody_events WHERE evidence_id = ? ORDER BY created_at", (item["id"],))
-    return items
-
-
-def create_rumor(data: dict[str, Any]) -> dict[str, Any]:
-    text = str(data.get("text") or "").strip()
-    if len(text) < 8:
-        raise ValueError("Rumor text must be at least 8 characters.")
-    key_terms = keywords(text)
-    severity = severity_score(text, "rumor")
-    rumor = {
-        "id": new_id("rum"),
-        "created_at": now(),
-        "language": str(data.get("language") or "en")[:12],
-        "rough_location": str(data.get("rough_location") or "unspecified")[:80],
-        "text": text,
-        "severity": severity,
-        "cluster_key": cluster_key("rumor", str(data.get("rough_location") or "unspecified"), key_terms),
-    }
-    with connect() as con:
-        con.execute(
-            "INSERT INTO rumors (id, created_at, language, rough_location, text, severity, cluster_key) VALUES (:id, :created_at, :language, :rough_location, :text, :severity, :cluster_key)",
-            rumor,
-        )
-        enqueue_sync(con, "rumor_summary", rumor["id"], {**rumor, "text": redact(rumor["text"])})
-    return rumor
-
-
-def list_rumor_clusters() -> list[dict[str, Any]]:
-    clusters = rows(
-        """
-        SELECT cluster_key, COUNT(*) AS count, MAX(severity) AS max_severity, MAX(created_at) AS latest_at
-        FROM rumors
-        GROUP BY cluster_key
-        ORDER BY max_severity DESC, count DESC
-        """
-    )
-    for cluster in clusters:
-        cluster["items"] = rows("SELECT * FROM rumors WHERE cluster_key = ? ORDER BY created_at DESC", (cluster["cluster_key"],))
-    return clusters
-
-
-def detect_anomaly(queue_length: int, flow_rate: float, uptime: int) -> str:
-    flags = []
-    if uptime == 0:
-        flags.append("pump offline")
-    if queue_length >= 40:
-        flags.append("queue pressure")
-    if flow_rate < 1.0:
-        flags.append("low flow")
-    return ", ".join(flags) if flags else "normal"
-
-
-def create_resource_event(data: dict[str, Any], con: sqlite3.Connection | None = None) -> dict[str, Any]:
-    owns = con is None
-    con = con or connect()
-    queue_length = int(data.get("queue_length") or 0)
-    flow_rate = float(data.get("flow_rate") or 0)
-    uptime = 1 if int(data.get("uptime", 1)) else 0
-    event = {
-        "id": new_id("res"),
-        "created_at": now(),
-        "resource_id": str(data.get("resource_id") or "water-point-north")[:80],
-        "queue_length": queue_length,
-        "flow_rate": flow_rate,
-        "uptime": uptime,
-        "anomaly": detect_anomaly(queue_length, flow_rate, uptime),
-    }
-    con.execute(
-        "INSERT INTO resource_events (id, created_at, resource_id, queue_length, flow_rate, uptime, anomaly) VALUES (:id, :created_at, :resource_id, :queue_length, :flow_rate, :uptime, :anomaly)",
-        event,
-    )
-    if event["anomaly"] != "normal":
-        enqueue_sync(con, "resource_anomaly", event["id"], event)
-    if owns:
-        con.commit()
-        con.close()
-    return event
-
-
-def resource_status() -> list[dict[str, Any]]:
-    return rows(
-        """
-        SELECT r.*
-        FROM resource_events r
-        WHERE r.rowid = (
-            SELECT latest.rowid
-            FROM resource_events latest
-            WHERE latest.resource_id = r.resource_id
-            ORDER BY latest.created_at DESC, latest.rowid DESC
-            LIMIT 1
-        )
-        ORDER BY r.resource_id
-        """
-    )
-
-
-def enqueue_sync(con: sqlite3.Connection, item_type: str, item_id: str, payload: dict[str, Any]) -> None:
-    con.execute(
-        "INSERT INTO sync_queue (id, created_at, item_type, item_id, payload) VALUES (?, ?, ?, ?, ?)",
-        (new_id("syn"), now(), item_type, item_id, json.dumps(payload)),
-    )
-
-
-def sync_status() -> dict[str, Any]:
-    with connect() as con:
-        rows_ = con.execute("SELECT status, COUNT(*) AS count FROM sync_queue GROUP BY status").fetchall()
-    counts = {"pending": 0, "synced": 0}
-    counts.update({row["status"]: row["count"] for row in rows_})
-    return counts
-
-
-def run_sync() -> dict[str, Any]:
-    synced = 0
-    with connect() as con:
-        pending = con.execute("SELECT id FROM sync_queue WHERE status = 'pending' ORDER BY created_at").fetchall()
-        for item in pending:
-            con.execute("UPDATE sync_queue SET status = 'synced', synced_at = ? WHERE id = ?", (now(), item["id"]))
-            synced += 1
-    return {"synced": synced, **sync_status()}
