@@ -117,6 +117,24 @@ class CoreTests(unittest.TestCase):
         self.assertIn("Wasimamizi", incident["public_update"])
         self.assertIn("North water point", incident["public_update"])
 
+    def test_privacy_audit_reports_policy_and_counts(self):
+        report = core.create_report({"text": "Families are turned away after long water queues."})
+        core.triage_report(report["id"])
+        core.create_evidence(
+            {
+                "filename": "note.txt",
+                "mime_type": "text/plain",
+                "content_base64": base64.b64encode(b"demo").decode("ascii"),
+            }
+        )
+
+        audit = core.privacy_audit()
+
+        self.assertEqual(audit["counts"]["reports"], 1)
+        self.assertEqual(audit["counts"]["evidence"], 1)
+        self.assertIn("Raw evidence file bytes.", audit["never_syncs"])
+        self.assertGreaterEqual(audit["raw_report_records"], 1)
+
     def test_incident_status_can_be_updated(self):
         report = core.create_report(
             {

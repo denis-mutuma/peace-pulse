@@ -26,6 +26,8 @@ Open `http://localhost:8080`, then verify:
 16. Toggle offline mode, submit a valid report, and confirm it appears in the browser queue.
 17. Toggle online mode, flush the queue, and confirm the accepted/rejected/still queued counts.
 18. Switch to coordinator role, run sync, and confirm pending counts clear.
-19. Confirm the coordinator sync view shows hub health, database status, queue counts, latest resource status, and last sync time.
-20. Confirm the sync preview shows redacted payload summaries and does not show raw report text or local evidence paths.
-21. Visit `/api/health` and confirm it reports `"database": "ok"`.
+19. Open the Privacy tab and confirm it shows record counts plus local-only, sync, and never-sync policies.
+20. Confirm the privacy audit states raw evidence bytes and local evidence paths never sync.
+21. Confirm the coordinator sync view shows hub health, database status, queue counts, latest resource status, and last sync time.
+22. Confirm the sync preview shows redacted payload summaries and does not show raw report text or local evidence paths.
+23. Visit `/api/health` and confirm it reports `"database": "ok"`.

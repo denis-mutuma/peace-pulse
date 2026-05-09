@@ -64,6 +64,17 @@ class ApiRouteTests(unittest.TestCase):
             "sync": {"pending": 0, "synced": 0},
         })
 
+    def test_privacy_audit_endpoint_reports_policy(self):
+        with isolated_core_db(self.tmp.name):
+            handler = FakeHandler(path="/api/privacy/audit")
+
+            server.Handler.do_GET(handler)
+
+        payload = json.loads(handler.wfile.getvalue())
+        self.assertEqual(handler.status, 200)
+        self.assertIn("counts", payload)
+        self.assertIn("Raw evidence file bytes.", payload["never_syncs"])
+
     def test_post_report_returns_201_without_raw_text(self):
         with isolated_core_db(self.tmp.name):
             sensitive_text = "Mr. Kamau says call +254 700 000 000 about blocked water access."

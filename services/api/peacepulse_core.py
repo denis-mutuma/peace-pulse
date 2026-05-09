@@ -192,6 +192,39 @@ def health_status() -> dict[str, Any]:
     return {"ok": True, "service": "peacepulse-edge", "database": "ok", "sync": sync_status()}
 
 
+def privacy_audit() -> dict[str, Any]:
+    with connect() as con:
+        counts = {
+            "reports": con.execute("SELECT COUNT(*) FROM reports").fetchone()[0],
+            "incidents": con.execute("SELECT COUNT(*) FROM incidents").fetchone()[0],
+            "evidence": con.execute("SELECT COUNT(*) FROM evidence").fetchone()[0],
+            "rumors": con.execute("SELECT COUNT(*) FROM rumors").fetchone()[0],
+            "pending_sync": con.execute("SELECT COUNT(*) FROM sync_queue WHERE status = 'pending'").fetchone()[0],
+        }
+        raw_reports = con.execute("SELECT COUNT(*) FROM reports WHERE text != ''").fetchone()[0]
+    return {
+        "counts": counts,
+        "local_only": [
+            "Raw report text is stored only on the edge hub until purged.",
+            "Encrypted evidence files stay in local storage.",
+            "Browser offline queue stays in the user's browser until flushed.",
+        ],
+        "syncs": [
+            "Incident summaries with redacted text, category, severity, and cluster keys.",
+            "Evidence metadata when sync is explicitly allowed.",
+            "Resource anomalies and rumor summaries for coordinator review.",
+            "Redacted responder notes for mediation continuity.",
+        ],
+        "never_syncs": [
+            "Local evidence storage paths.",
+            "Raw evidence file bytes.",
+            "Unredacted rumor text.",
+            "Identity documents, account profiles, or movement trails.",
+        ],
+        "raw_report_records": raw_reports,
+    }
+
+
 def seed_demo(con: sqlite3.Connection) -> None:
     samples = [
         {

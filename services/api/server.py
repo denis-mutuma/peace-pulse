@@ -23,6 +23,7 @@ from peacepulse_core import (
     list_rumor_clusters,
     list_status_history,
     public_report,
+    privacy_audit,
     resource_status,
     run_sync,
     sync_preview,
@@ -54,6 +55,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/health":
                 self.json(health_status())
+            elif path == "/api/privacy/audit":
+                self.json(privacy_audit())
             elif path.endswith("/timeline") and path.startswith("/api/incidents/"):
                 incident_id = path.split("/")[3]
                 self.json(incident_timeline(incident_id))

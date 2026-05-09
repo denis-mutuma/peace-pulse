@@ -496,6 +496,23 @@ async function loadRumors() {
   `).join("") || `<p class="empty">No rumor clusters yet.</p>`;
 }
 
+async function loadPrivacyAudit() {
+  const audit = await api("/api/privacy/audit");
+  $("#privacyCounts").innerHTML = Object.entries(audit.counts).map(([key, value]) => `
+    <div class="metricTile">
+      <span>${escapeHtml(key.replaceAll("_", " "))}</span>
+      <strong>${escapeHtml(value)}</strong>
+    </div>
+  `).join("");
+  $("#privacyLocal").innerHTML = policyList(audit.local_only);
+  $("#privacySyncs").innerHTML = policyList(audit.syncs);
+  $("#privacyNever").innerHTML = policyList(audit.never_syncs);
+}
+
+function policyList(items) {
+  return `<ul class="policyList">${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+}
+
 async function loadSync() {
   const [health, resources, preview] = await Promise.all([
     api("/api/health"),
@@ -546,7 +563,7 @@ function renderSyncPreview(items) {
 }
 
 async function refreshAll() {
-  await Promise.allSettled([loadIncidents(), loadEvidence(), loadResources(), loadRumors(), checkHub()]);
+  await Promise.allSettled([loadIncidents(), loadEvidence(), loadResources(), loadRumors(), loadPrivacyAudit(), checkHub()]);
   if (state.role === "coordinator") await loadSync().catch(() => {});
 }
 
@@ -615,6 +632,7 @@ function bind() {
   $("#simulateSensor").addEventListener("click", simulateSensor);
   $("#rumorForm").addEventListener("submit", submitRumor);
   $("#runSync").addEventListener("click", runSync);
+  $("#refreshPrivacy").addEventListener("click", loadPrivacyAudit);
   $("#resetDemo").addEventListener("click", resetDemoLog);
   $$("[data-demo-action]").forEach((button) => {
     button.addEventListener("click", () => runDemoStep(button.dataset.demoAction));
@@ -636,6 +654,7 @@ function activateView(view) {
   $$(".tab").forEach((item) => item.classList.toggle("active", item.dataset.view === view));
   $$(".view").forEach((item) => item.classList.toggle("active", item.id === view));
   if (view === "sync") loadSync().catch(() => {});
+  if (view === "privacy") loadPrivacyAudit().catch(() => {});
 }
 
 if ("serviceWorker" in navigator) {

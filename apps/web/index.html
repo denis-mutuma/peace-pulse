@@ -33,6 +33,7 @@
         <button class="tab" data-view="evidence" data-role="steward">Evidence</button>
         <button class="tab" data-view="resources" data-role="steward">Resources</button>
         <button class="tab" data-view="rumors" data-role="steward">Rumors</button>
+        <button class="tab" data-view="privacy" data-role="steward">Privacy</button>
         <button class="tab" data-view="sync" data-role="coordinator">Sync</button>
         <button class="tab" data-view="routes">SafeRoute</button>
         <button class="tab" data-view="work">FairWork</button>
@@ -212,6 +213,28 @@
           </form>
         </div>
         <div id="rumorGrid" class="grid"></div>
+      </section>
+
+      <section id="privacy" class="view">
+        <div class="sectionHeader">
+          <h2>Privacy Audit</h2>
+          <button id="refreshPrivacy" type="button">Refresh</button>
+        </div>
+        <div class="healthGrid" id="privacyCounts"></div>
+        <div class="policyGrid">
+          <article class="panel">
+            <h3>Stored locally</h3>
+            <div id="privacyLocal"></div>
+          </article>
+          <article class="panel">
+            <h3>Allowed to sync</h3>
+            <div id="privacySyncs"></div>
+          </article>
+          <article class="panel">
+            <h3>Never synced</h3>
+            <div id="privacyNever"></div>
+          </article>
+        </div>
       </section>
 
       <section id="sync" class="view">

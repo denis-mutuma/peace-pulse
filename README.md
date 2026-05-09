@@ -56,3 +56,20 @@ See [Manual Test Checklist](docs/manual-test.md) for a fuller smoke test.
 ## Safety Boundaries
 
 The prototype does not identify people, infer guilt, track individual movement, or expose raw report text through the dashboard API. Triage output is deterministic local assistance for human review.
+
+## Privacy Audit
+
+Steward and coordinator roles include a Privacy tab that explains the local-first data policy in the running demo. It shows current record counts, what stays local, what may sync as a redacted summary, and what never syncs.
+
+Use this view during demos to make the safety boundary explicit before showing the coordinator sync preview. The intended message is that PeacePulse supports human review and low-bandwidth coordination without becoming an identity, surveillance, or raw-evidence export system.
+
+Demo talking points:
+
+- Reports are anonymous and dashboard text is redacted.
+- Evidence files remain encrypted in local edge storage.
+- Sync preview shows summaries and metadata, not raw evidence bytes.
+- The app does not create accounts, track movement, or infer guilt.
+- The privacy audit should be shown before any discussion of deployment.
+
+The audit is deliberately simple: it is a demo-facing safety explanation, not a legal compliance report.
+Keep production compliance review separate from this prototype.

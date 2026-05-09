@@ -351,6 +351,22 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.policyGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.8rem;
+}
+
+.policyList {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--muted);
+}
+
+.policyList li {
+  margin: 0.55rem 0;
+}
+
 .result {
   margin-top: 1rem;
   color: var(--muted);
