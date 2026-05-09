@@ -43,7 +43,7 @@ class ApiRouteTests(unittest.TestCase):
 
     def test_unknown_api_get_returns_404(self):
         handler = FakeHandler()
-        handler.path = "/api/evidence"
+        handler.path = "/api/unknown"
 
         server.Handler.do_GET(handler)
 
@@ -61,6 +61,7 @@ class ApiRouteTests(unittest.TestCase):
             "ok": True,
             "service": "peacepulse-edge",
             "database": "ok",
+            "sync": {"pending": 0, "synced": 0},
         })
 
     def test_post_report_returns_201_without_raw_text(self):

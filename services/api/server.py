@@ -9,12 +9,20 @@ from urllib.parse import urlparse
 
 from peacepulse_core import (
     ROOT,
+    create_evidence,
     create_report,
+    create_resource_event,
+    create_rumor,
     health_status,
     init_db,
+    list_evidence,
     list_incidents,
+    list_rumor_clusters,
     list_status_history,
     public_report,
+    resource_status,
+    run_sync,
+    sync_status,
     triage_report,
     update_incident_status,
 )
@@ -47,6 +55,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.json(list_status_history(incident_id))
             elif path == "/api/incidents":
                 self.json(list_incidents())
+            elif path == "/api/evidence":
+                self.json(list_evidence())
+            elif path == "/api/resources/status":
+                self.json(resource_status())
+            elif path == "/api/rumors/clusters":
+                self.json(list_rumor_clusters())
+            elif path == "/api/sync/status":
+                self.json(sync_status())
             elif path.startswith("/api/"):
                 self.error(404, "Route not found.")
             else:
@@ -62,6 +78,14 @@ class Handler(BaseHTTPRequestHandler):
                 report = create_report(body)
                 incident = triage_report(report["id"])
                 self.json({"report": public_report(report), "incident": incident}, 201)
+            elif path == "/api/evidence":
+                self.json(create_evidence(body), 201)
+            elif path == "/api/sensor-events":
+                self.json(create_resource_event(body), 201)
+            elif path == "/api/rumors":
+                self.json(create_rumor(body), 201)
+            elif path == "/api/sync/run":
+                self.json(run_sync())
             else:
                 self.error(404, "Route not found.")
         except ValueError as exc:
@@ -124,7 +148,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    init_db()
+    init_db(seed_demo_data=True)
     host = os.environ.get("PEACEPULSE_HOST", "0.0.0.0")
     port = int(os.environ.get("PEACEPULSE_PORT", "8080"))
     print(f"PeacePulse edge hub listening on http://localhost:{port}")
