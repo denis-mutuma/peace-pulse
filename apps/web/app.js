@@ -8,6 +8,39 @@ const state = {
 
 const MAX_EVIDENCE_BYTES = 2_000_000;
 const EVIDENCE_MIME_PREFIXES = ["image/", "audio/", "text/", "application/pdf"];
+const GUIDED_REPORTS = {
+  resource: {
+    location: "North water point",
+    text: "There is tension at the main water point because some families are being turned away.",
+  },
+  threat: {
+    location: "Clinic route",
+    text: "People feel unsafe near the clinic route after dark and want steward review.",
+  },
+  corruption: {
+    location: "Distribution desk",
+    text: "Community members are worried that aid is not reaching people fairly.",
+  },
+  rumor: {
+    location: "North water point",
+    text: "People say aid is being diverted before it reaches the water point.",
+  },
+  unsafe_route: {
+    location: "East corridor",
+    text: "The route to the clinic feels unsafe and needs a service-point update.",
+  },
+  work_exploitation: {
+    location: "Central market",
+    text: "A work opportunity may be unsafe or exploitative and needs steward review.",
+  },
+};
+const RISK_PATTERNS = [
+  { label: "phone number", pattern: /(?:\+?\d[\d\s().-]{7,}\d)/i },
+  { label: "email address", pattern: /\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/i },
+  { label: "ID-like number", pattern: /\b(?:id|passport|permit|card)\s*[#: -]?\s*[a-z0-9-]{5,}\b/i },
+  { label: "exact block or unit", pattern: /\b(?:block|unit|house|tent|room)\s+[a-z]?-?\d+\b/i },
+  { label: "person name", pattern: /\b(?:mr|mrs|ms|miss|dr|sheikh|pastor)\.?\s+[A-Z][a-z]+\b/ },
+];
 const PHRASEBOOK = {
   en: {
     samples: [
@@ -120,6 +153,32 @@ function newLocalId() {
 function updateTextCount() {
   const text = $("#reportForm").elements.text.value;
   $("#textCount").textContent = `${text.length} / 2000 characters`;
+  updateRiskWarning();
+}
+
+function sensitiveDetailLabels(text) {
+  return RISK_PATTERNS.filter((item) => item.pattern.test(text)).map((item) => item.label);
+}
+
+function updateRiskWarning() {
+  const labels = sensitiveDetailLabels($("#reportForm").elements.text.value);
+  const target = $("#riskWarning");
+  target.hidden = labels.length === 0;
+  target.innerHTML = labels.length ? `
+    <strong>Check before sending:</strong>
+    This report may include ${escapeHtml(labels.join(", "))}. Remove identifying details unless they are essential.
+  ` : "";
+}
+
+function applyGuidedReport(category) {
+  const preset = GUIDED_REPORTS[category];
+  if (!preset) return;
+  const form = $("#reportForm");
+  form.elements.category_hint.value = category;
+  form.elements.rough_location.value = preset.location;
+  form.elements.text.value = preset.text;
+  setResult("Guided report loaded. Add only non-identifying details before submitting.");
+  updateTextCount();
 }
 
 function renderPhrasebook() {
@@ -727,6 +786,9 @@ function bind() {
   $("#resetDemoData").addEventListener("click", resetDemoData);
   $$("[data-demo-action]").forEach((button) => {
     button.addEventListener("click", () => runDemoStep(button.dataset.demoAction));
+  });
+  $$("[data-guided-report]").forEach((button) => {
+    button.addEventListener("click", () => applyGuidedReport(button.dataset.guidedReport));
   });
   $("#reportForm").addEventListener("input", () => {
     setResult("");

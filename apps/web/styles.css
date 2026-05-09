@@ -166,6 +166,36 @@ textarea {
   color: #62420f;
 }
 
+.guidedIntake {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.6rem;
+  margin: 0.8rem 0 1rem;
+}
+
+.guidedIntake button {
+  display: grid;
+  gap: 0.25rem;
+  min-height: 5.5rem;
+  text-align: left;
+  background: #edf4f1;
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+
+.guidedIntake span {
+  font-weight: 800;
+  color: var(--teal);
+}
+
+.riskWarning {
+  margin: 0;
+  padding: 0.8rem;
+  border-left: 4px solid var(--red);
+  background: #fff0f0;
+  color: #6c2020;
+}
+
 .phrasebook {
   display: grid;
   gap: 0.6rem;

@@ -38,12 +38,14 @@ uv run python -m unittest discover -s tests
 
 ## Demo Flow
 
-1. Open the Demo tab and run the guided water-point scenario.
-2. Review the redacted incident in the responder dashboard.
-3. Check the evidence hash/custody record and resource anomaly.
-4. Review the related rumor cluster for steward notes.
-5. Toggle offline mode in the browser, submit another report, then go online and flush the queue.
-6. Switch to coordinator role, inspect the node health/sync preview, and run sync.
+1. Use a guided report tile to load a low-literacy starter report.
+2. Add a phone number or exact block to show the active privacy warning, then remove it.
+3. Open the Demo tab and run the guided water-point scenario.
+4. Review the redacted incident in the responder dashboard.
+5. Check the evidence hash/custody record and resource anomaly.
+6. Review the related rumor cluster for steward notes.
+7. Toggle offline mode in the browser, submit another report, then go online and flush the queue.
+8. Switch to coordinator role, inspect the node health/sync preview, and run sync.
 
 See [Manual Test Checklist](docs/manual-test.md) for a fuller smoke test.
 
@@ -78,11 +80,18 @@ Reset safety notes:
 
 Recommended rehearsal order after reset:
 
-1. Run the guided scenario.
-2. Add one mediation note.
-3. Open the privacy audit.
-4. Run coordinator sync.
-5. Confirm the sync preview is redacted.
+1. Select a guided intake tile and confirm the report form fills safely.
+2. Run the guided scenario.
+3. Add one mediation note.
+4. Open the privacy audit.
+5. Run coordinator sync.
+6. Confirm the sync preview is redacted.
+
+## Guided Intake
+
+The Report tab includes low-literacy guided tiles for the main concern types. Each tile fills the report category, a rough location, and a safe starter sentence that avoids names, phone numbers, and exact homes.
+
+The browser also checks the report text for likely sensitive details before submission. Phone numbers, email addresses, ID-like values, exact block/unit locations, and titled names trigger a warning panel. The warning does not block reporting; it gives the community member a chance to remove identifying details while the backend still performs deterministic redaction during triage.
 
 ## Services
 

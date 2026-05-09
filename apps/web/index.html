@@ -42,6 +42,32 @@
       <section id="report" class="view active">
         <div class="panel">
           <h2>Anonymous Report</h2>
+          <div class="guidedIntake" aria-label="Guided concern choices">
+            <button type="button" data-guided-report="resource">
+              <span>Water</span>
+              Resource dispute
+            </button>
+            <button type="button" data-guided-report="threat">
+              <span>Alert</span>
+              Threat or intimidation
+            </button>
+            <button type="button" data-guided-report="corruption">
+              <span>Aid</span>
+              Corruption or abuse
+            </button>
+            <button type="button" data-guided-report="rumor">
+              <span>Talk</span>
+              Harmful rumor
+            </button>
+            <button type="button" data-guided-report="unsafe_route">
+              <span>Path</span>
+              Unsafe route
+            </button>
+            <button type="button" data-guided-report="work_exploitation">
+              <span>Work</span>
+              Work exploitation
+            </button>
+          </div>
           <form id="reportForm" class="form">
             <label>Language
               <select name="language" id="reportLanguage">
@@ -69,6 +95,7 @@
             </label>
             <p id="textCount" class="counter wide">0 / 2000 characters</p>
             <p class="notice wide">Avoid names, exact homes, phone numbers, or details that could expose someone.</p>
+            <div id="riskWarning" class="riskWarning wide" hidden role="status"></div>
             <div class="phrasebook wide" id="phrasebook"></div>
             <button type="submit">Submit report</button>
           </form>
