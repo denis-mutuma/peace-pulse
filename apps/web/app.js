@@ -6,6 +6,8 @@ const state = {
   demoLog: JSON.parse(localStorage.getItem("peacepulse-demo-log") || "[]"),
 };
 
+const MAX_EVIDENCE_BYTES = 2_000_000;
+const EVIDENCE_MIME_PREFIXES = ["image/", "audio/", "text/", "application/pdf"];
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
@@ -272,18 +274,34 @@ async function uploadEvidence(event) {
   const form = event.currentTarget;
   const file = form.elements.file.files[0];
   if (!file) return;
-  const content_base64 = await readAsDataUrl(file);
-  await api("/api/evidence", {
-    method: "POST",
-    body: {
-      filename: file.name,
-      mime_type: file.type || "application/octet-stream",
-      content_base64,
-      sync_allowed: form.elements.sync_allowed.checked,
-    },
-  });
-  form.reset();
-  await loadEvidence();
+  try {
+    validateEvidenceFile(file);
+    const content_base64 = await readAsDataUrl(file);
+    await api("/api/evidence", {
+      method: "POST",
+      body: {
+        filename: file.name,
+        mime_type: file.type,
+        content_base64,
+        sync_allowed: form.elements.sync_allowed.checked,
+      },
+    });
+    $("#evidenceResult").textContent = "Evidence uploaded, hashed, and stored locally.";
+    form.reset();
+    await loadEvidence();
+    if (state.role === "coordinator") await loadSync().catch(() => {});
+  } catch (error) {
+    $("#evidenceResult").textContent = error.message;
+  }
+}
+
+function validateEvidenceFile(file) {
+  if (file.size > MAX_EVIDENCE_BYTES) {
+    throw new Error("Evidence file must be 2 MB or smaller.");
+  }
+  if (!EVIDENCE_MIME_PREFIXES.some((prefix) => file.type.startsWith(prefix))) {
+    throw new Error("Use an image, audio file, text file, or PDF.");
+  }
 }
 
 async function loadEvidence() {

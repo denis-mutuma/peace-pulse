@@ -21,3 +21,12 @@ jobs:
         run: |
           rsync -az --delete -e "ssh -i ~/.ssh/peacepulse" ./ "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/opt/peacepulse/app/"
           ssh -i ~/.ssh/peacepulse "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" "cd /opt/peacepulse/app && docker compose -f infra/docker-compose.yml up -d --build"
+      - name: Verify health
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if curl --fail --silent --show-error "http://${{ secrets.EC2_HOST }}:8080/api/health"; then
+              exit 0
+            fi
+            sleep 5
+          done
+          exit 1

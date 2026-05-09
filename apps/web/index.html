@@ -165,7 +165,7 @@
           <h2>Civic Evidence Locker</h2>
           <form id="evidenceForm" class="form">
             <label class="wide">Evidence file
-              <input name="file" type="file" />
+              <input name="file" type="file" accept="image/*,audio/*,text/*,application/pdf" />
             </label>
             <label class="check wide">
               <input type="checkbox" name="sync_allowed" />
@@ -173,6 +173,7 @@
             </label>
             <button type="submit">Upload evidence</button>
           </form>
+          <div id="evidenceResult" class="result" role="status"></div>
         </div>
         <div id="evidenceList" class="grid"></div>
       </section>
