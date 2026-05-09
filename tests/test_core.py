@@ -78,6 +78,26 @@ class CoreTests(unittest.TestCase):
         self.assertNotIn(sensitive_text, incident.values())
         self.assertIn("[redacted-name]", incident["redacted_text"])
 
+    def test_redaction_covers_email_id_and_unit_location(self):
+        sensitive_text = "Ms. Amina in Block C-12 shared ID AB123456 and email amina@example.org."
+        report = core.create_report(
+            {
+                "language": "en",
+                "rough_location": "North camp",
+                "category_hint": "threat",
+                "text": sensitive_text,
+            }
+        )
+
+        incident = core.triage_report(report["id"])
+
+        self.assertIn("[redacted-name]", incident["redacted_text"])
+        self.assertIn("[redacted-location]", incident["redacted_text"])
+        self.assertIn("[redacted-id]", incident["redacted_text"])
+        self.assertIn("[redacted-email]", incident["redacted_text"])
+        self.assertNotIn("amina@example.org", incident["redacted_text"])
+        self.assertNotIn("Block C-12", incident["redacted_text"])
+
     def test_incident_status_can_be_updated(self):
         report = core.create_report(
             {

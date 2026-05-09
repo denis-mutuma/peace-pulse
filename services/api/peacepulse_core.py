@@ -26,8 +26,10 @@ REPORT_CATEGORIES = {
 }
 
 SENSITIVE_PATTERNS = [
+    (re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE), "[redacted-email]"),
     (re.compile(r"\b(?:\+?\d[\d\-\s()]{7,}\d)\b"), "[redacted-phone]"),
     (re.compile(r"\b[A-Z]{2,}\d{5,}\b"), "[redacted-id]"),
+    (re.compile(r"\b(?:block|unit|tent|shelter|house)\s+[A-Z0-9-]{1,12}\b", re.IGNORECASE), "[redacted-location]"),
     (re.compile(r"\b(?:near|at|behind|opposite)\s+[A-Z][A-Za-z0-9\s]{3,40}"), "[redacted-location]"),
     (re.compile(r"\b(?:Mr|Mrs|Ms|Dr)\.?\s+[A-Z][a-z]+\b"), "[redacted-name]"),
 ]
