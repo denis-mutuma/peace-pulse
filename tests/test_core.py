@@ -102,6 +102,21 @@ class CoreTests(unittest.TestCase):
         self.assertNotIn("amina@example.org", incident["redacted_text"])
         self.assertNotIn("Block C-12", incident["redacted_text"])
 
+    def test_public_update_uses_report_language(self):
+        report = core.create_report(
+            {
+                "language": "sw",
+                "rough_location": "North water point",
+                "category_hint": "resource",
+                "text": "People say aid is diverted and water queues are causing tension.",
+            }
+        )
+
+        incident = core.triage_report(report["id"])
+
+        self.assertIn("Wasimamizi", incident["public_update"])
+        self.assertIn("North water point", incident["public_update"])
+
     def test_incident_status_can_be_updated(self):
         report = core.create_report(
             {

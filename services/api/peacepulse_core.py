@@ -31,6 +31,13 @@ REPORT_CATEGORIES = {
     "work_exploitation": ["work", "wage", "pay", "exploitation", "job"],
 }
 
+PUBLIC_UPDATE_TEMPLATES = {
+    "en": "Community stewards are reviewing a {category} concern near {location}. Please use verified service points and avoid sharing identifying details.",
+    "sw": "Wasimamizi wa jamii wanapitia suala la {category} karibu na {location}. Tafadhali tumia vituo vilivyothibitishwa na epuka kushiriki taarifa za kumtambulisha mtu.",
+    "fr": "Les relais communautaires examinent une alerte {category} pres de {location}. Utilisez les points de service verifies et evitez les details identifiants.",
+    "ar": "يراجع مشرفو المجتمع بلاغ {category} قرب {location}. استخدموا نقاط الخدمة المؤكدة وتجنبوا مشاركة التفاصيل التي تكشف الهوية.",
+}
+
 SENSITIVE_PATTERNS = [
     (re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE), "[redacted-email]"),
     (re.compile(r"\b(?:\+?\d[\d\-\s()]{7,}\d)\b"), "[redacted-phone]"),
@@ -305,12 +312,10 @@ def cluster_key(category: str, location: str, key_terms: list[str]) -> str:
     return f"{category}:{location_key}:{anchor}"
 
 
-def make_public_update(category: str, location: str) -> str:
+def make_public_update(category: str, location: str, language: str = "en") -> str:
     label = category.replace("_", " ")
-    return (
-        f"Community stewards are reviewing a {label} concern near {location}. "
-        "Please use verified service points and avoid sharing identifying details."
-    )
+    template = PUBLIC_UPDATE_TEMPLATES.get(language, PUBLIC_UPDATE_TEMPLATES["en"])
+    return template.format(category=label, location=location)
 
 
 def triage_report(report_id: str, con: sqlite3.Connection | None = None) -> dict[str, Any]:
@@ -339,7 +344,7 @@ def triage_report(report_id: str, con: sqlite3.Connection | None = None) -> dict
         "redacted_text": redacted_text,
         "keywords": json.dumps(key_terms),
         "cluster_key": cluster_key(category, report["rough_location"], key_terms),
-        "public_update": make_public_update(category, report["rough_location"]),
+        "public_update": make_public_update(category, report["rough_location"], report["language"]),
     }
     con.execute(
         """

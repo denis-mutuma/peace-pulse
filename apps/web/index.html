@@ -43,7 +43,7 @@
           <h2>Anonymous Report</h2>
           <form id="reportForm" class="form">
             <label>Language
-              <select name="language">
+              <select name="language" id="reportLanguage">
                 <option value="en">English</option>
                 <option value="sw">Swahili</option>
                 <option value="fr">French</option>
@@ -68,6 +68,7 @@
             </label>
             <p id="textCount" class="counter wide">0 / 2000 characters</p>
             <p class="notice wide">Avoid names, exact homes, phone numbers, or details that could expose someone.</p>
+            <div class="phrasebook wide" id="phrasebook"></div>
             <button type="submit">Submit report</button>
           </form>
         </div>

@@ -8,6 +8,40 @@ const state = {
 
 const MAX_EVIDENCE_BYTES = 2_000_000;
 const EVIDENCE_MIME_PREFIXES = ["image/", "audio/", "text/", "application/pdf"];
+const PHRASEBOOK = {
+  en: {
+    samples: [
+      "There is tension at the main water point because some families are being turned away.",
+      "People say aid is being diverted before it reaches the water point.",
+      "The clinic route feels unsafe after dark.",
+    ],
+    warning: "Avoid names, exact homes, phone numbers, or details that could expose someone.",
+  },
+  sw: {
+    samples: [
+      "Kuna mvutano kwenye kituo cha maji kwa sababu baadhi ya familia zinarudishwa.",
+      "Watu wanasema msaada unaelekezwa kwingine kabla ya kufika kwenye kituo cha maji.",
+      "Njia ya kliniki inaonekana si salama baada ya giza kuingia.",
+    ],
+    warning: "Epuka majina, nyumba maalum, namba za simu, au taarifa zinazoweza kumtambulisha mtu.",
+  },
+  fr: {
+    samples: [
+      "Il y a des tensions au point d'eau car certaines familles sont refoulees.",
+      "Des personnes disent que l'aide est detournee avant d'arriver au point d'eau.",
+      "La route vers la clinique semble dangereuse apres la tombee de la nuit.",
+    ],
+    warning: "Evitez les noms, domiciles exacts, numeros de telephone ou details identifiants.",
+  },
+  ar: {
+    samples: [
+      "هناك توتر عند نقطة المياه لأن بعض العائلات يتم إرجاعها.",
+      "يقول الناس إن المساعدات يتم تحويلها قبل وصولها إلى نقطة المياه.",
+      "الطريق إلى العيادة يبدو غير آمن بعد حلول الظلام.",
+    ],
+    warning: "تجنبوا الأسماء أو المنازل الدقيقة أو أرقام الهاتف أو أي تفاصيل تكشف الهوية.",
+  },
+};
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
@@ -86,6 +120,23 @@ function newLocalId() {
 function updateTextCount() {
   const text = $("#reportForm").elements.text.value;
   $("#textCount").textContent = `${text.length} / 2000 characters`;
+}
+
+function renderPhrasebook() {
+  const language = $("#reportLanguage").value;
+  const entry = PHRASEBOOK[language] || PHRASEBOOK.en;
+  $("#phrasebook").innerHTML = `
+    <p>${escapeHtml(entry.warning)}</p>
+    <div>
+      ${entry.samples.map((sample) => `<button class="secondary" type="button" data-sample="${escapeHtml(sample)}">${escapeHtml(sample)}</button>`).join("")}
+    </div>
+  `;
+  $$("[data-sample]").forEach((button) => {
+    button.addEventListener("click", () => {
+      $("#reportForm").elements.text.value = button.dataset.sample;
+      updateTextCount();
+    });
+  });
 }
 
 async function submitReport(event) {
@@ -572,6 +623,7 @@ function bind() {
     setResult("");
     updateTextCount();
   });
+  $("#reportLanguage").addEventListener("change", renderPhrasebook);
   ["#statusFilter", "#categoryFilter", "#severityFilter"].forEach((selector) => {
     $(selector).addEventListener("change", () => {
       setDashboardResult("");
@@ -594,5 +646,6 @@ bind();
 applyRole();
 updateQueueCount();
 updateTextCount();
+renderPhrasebook();
 renderDemoLog();
 refreshAll();
