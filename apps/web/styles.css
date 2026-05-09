@@ -187,6 +187,49 @@ textarea {
   gap: 0.8rem;
 }
 
+.scenario {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 0.8rem;
+  margin: 1rem 0;
+}
+
+.scenarioStep {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1rem;
+  min-height: 250px;
+  display: grid;
+  align-content: start;
+  gap: 0.65rem;
+}
+
+.scenarioStep span {
+  width: 2rem;
+  height: 2rem;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--gold);
+  color: white;
+  font-weight: 700;
+}
+
+.scenarioStep h3,
+.scenarioStep p {
+  margin: 0;
+}
+
+.scenarioStep p {
+  color: var(--muted);
+}
+
+.scenarioStep button {
+  align-self: end;
+  margin-top: auto;
+}
+
 .card h3 {
   margin: 0 0 0.4rem;
 }

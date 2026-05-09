@@ -3,6 +3,7 @@ const state = {
   role: localStorage.getItem("peacepulse-role") || "community",
   incidents: [],
   lastSyncAt: localStorage.getItem("peacepulse-last-sync") || "",
+  demoLog: JSON.parse(localStorage.getItem("peacepulse-demo-log") || "[]"),
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -46,6 +47,10 @@ function setResult(text) {
 
 function setDashboardResult(text) {
   $("#dashboardResult").textContent = text;
+}
+
+function setDemoResult(text) {
+  $("#demoResult").textContent = text;
 }
 
 function queue() {
@@ -98,6 +103,95 @@ async function submitReport(event) {
     }
     setResult(error.message);
   }
+}
+
+const demoPayloads = {
+  report: {
+    language: "en",
+    rough_location: "North water point",
+    category_hint: "resource",
+    text: "There is tension at the main water point because some families are being turned away after long queues.",
+  },
+  evidence: {
+    filename: "water-point-note.txt",
+    mime_type: "text/plain",
+    content_base64: btoa("Steward note: queue pressure and allegations of favoritism need mediation review."),
+    sync_allowed: true,
+  },
+  resource: {
+    resource_id: "water-point-north",
+    queue_length: 58,
+    flow_rate: 0.3,
+    uptime: 0,
+    maintenance_note: "Pump inspection requested during mediation review",
+  },
+  rumor: {
+    language: "en",
+    rough_location: "North water point",
+    text: "People say aid is being diverted before it reaches the water point.",
+    response_notes: "Verify through service desk and publish a non-identifying update.",
+  },
+};
+
+const demoActions = {
+  async report() {
+    const result = await api("/api/reports", { method: "POST", body: demoPayloads.report });
+    return `Report triaged as ${result.incident.category} with severity ${result.incident.severity}.`;
+  },
+  async evidence() {
+    const result = await api("/api/evidence", { method: "POST", body: demoPayloads.evidence });
+    return `Evidence hashed ${result.sha256.slice(0, 16)}... and stored locally.`;
+  },
+  async resource() {
+    const result = await api("/api/sensor-events", { method: "POST", body: demoPayloads.resource });
+    return `Resource anomaly recorded: ${result.anomaly}.`;
+  },
+  async rumor() {
+    const result = await api("/api/rumors", { method: "POST", body: demoPayloads.rumor });
+    return `Rumor cluster queued with severity ${result.severity}.`;
+  },
+};
+
+async function runDemoStep(action) {
+  const button = $(`[data-demo-action="${action}"]`);
+  button.disabled = true;
+  setDemoResult("Running scenario step...");
+  try {
+    const message = await demoActions[action]();
+    addDemoLog(action, message);
+    setDemoResult(message);
+    await refreshAll();
+  } catch (error) {
+    setDemoResult(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function addDemoLog(action, message) {
+  state.demoLog = [
+    {
+      action,
+      message,
+      created_at: new Date().toISOString(),
+    },
+    ...state.demoLog,
+  ].slice(0, 8);
+  localStorage.setItem("peacepulse-demo-log", JSON.stringify(state.demoLog));
+  renderDemoLog();
+}
+
+function resetDemoLog() {
+  state.demoLog = [];
+  localStorage.removeItem("peacepulse-demo-log");
+  setDemoResult("");
+  renderDemoLog();
+}
+
+function renderDemoLog() {
+  $("#demoLog").innerHTML = state.demoLog.map((item) => `
+    <p><strong>${escapeHtml(item.action)}</strong> ${escapeHtml(item.message)}<br>${new Date(item.created_at).toLocaleString()}</p>
+  `).join("") || `<p class="empty">Run the scenario steps to build the demo story.</p>`;
 }
 
 async function flushQueue() {
@@ -374,6 +468,10 @@ function bind() {
   $("#simulateSensor").addEventListener("click", simulateSensor);
   $("#rumorForm").addEventListener("submit", submitRumor);
   $("#runSync").addEventListener("click", runSync);
+  $("#resetDemo").addEventListener("click", resetDemoLog);
+  $$("[data-demo-action]").forEach((button) => {
+    button.addEventListener("click", () => runDemoStep(button.dataset.demoAction));
+  });
   $("#reportForm").addEventListener("input", () => {
     setResult("");
     updateTextCount();
@@ -400,4 +498,5 @@ bind();
 applyRole();
 updateQueueCount();
 updateTextCount();
+renderDemoLog();
 refreshAll();

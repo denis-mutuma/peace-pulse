@@ -28,6 +28,7 @@
     <main class="layout">
       <nav class="tabs" aria-label="Primary views">
         <button class="tab active" data-view="report">Report</button>
+        <button class="tab" data-view="demo">Demo</button>
         <button class="tab" data-view="dashboard" data-role="steward">Dashboard</button>
         <button class="tab" data-view="evidence" data-role="steward">Evidence</button>
         <button class="tab" data-view="resources" data-role="steward">Resources</button>
@@ -76,6 +77,44 @@
           <button id="flushQueue" type="button">Flush queue</button>
           <div id="queueList" class="queueList"></div>
           <div id="reportResult" class="result"></div>
+        </div>
+      </section>
+
+      <section id="demo" class="view">
+        <div class="sectionHeader">
+          <h2>Guided Water-point Scenario</h2>
+          <button id="resetDemo" type="button" class="secondary">Reset log</button>
+        </div>
+        <div class="scenario">
+          <article class="scenarioStep">
+            <span>1</span>
+            <h3>Submit first signal</h3>
+            <p>Resource tension at the north water point enters the anonymous intake flow.</p>
+            <button type="button" data-demo-action="report">Submit report</button>
+          </article>
+          <article class="scenarioStep">
+            <span>2</span>
+            <h3>Add supporting evidence</h3>
+            <p>A text evidence note is hashed, locally encrypted, and queued as metadata only.</p>
+            <button type="button" data-demo-action="evidence">Upload evidence note</button>
+          </article>
+          <article class="scenarioStep">
+            <span>3</span>
+            <h3>Show resource pressure</h3>
+            <p>Simulated pump downtime and queue pressure add a resource anomaly.</p>
+            <button type="button" data-demo-action="resource">Simulate sensor</button>
+          </article>
+          <article class="scenarioStep">
+            <span>4</span>
+            <h3>Log rumor spread</h3>
+            <p>Stewards record a repeated aid-diversion rumor for human review.</p>
+            <button type="button" data-demo-action="rumor">Log rumor</button>
+          </article>
+        </div>
+        <div class="panel">
+          <h2>Scenario Log</h2>
+          <div id="demoResult" class="result" role="status"></div>
+          <div id="demoLog" class="queueList"></div>
         </div>
       </section>
 

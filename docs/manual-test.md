@@ -14,11 +14,13 @@ Open `http://localhost:8080`, then verify:
 4. Upload an evidence file and confirm hash/custody metadata appears.
 5. Simulate a resource event and confirm anomaly/resource status appears.
 6. Log a rumor and confirm the redacted cluster appears.
-7. Filter incidents by status, category, and minimum severity.
-8. Submit a short invalid report and confirm it is rejected without entering the offline queue.
-9. Toggle offline mode, submit a valid report, and confirm it appears in the browser queue.
-10. Toggle online mode, flush the queue, and confirm the accepted/rejected/still queued counts.
-11. Switch to coordinator role, run sync, and confirm pending counts clear.
-12. Confirm the coordinator sync view shows hub health, database status, queue counts, latest resource status, and last sync time.
-13. Confirm the sync preview shows redacted payload summaries and does not show raw report text or local evidence paths.
-14. Visit `/api/health` and confirm it reports `"database": "ok"`.
+7. Open the Demo tab, run all four water-point scenario steps, and confirm the scenario log records each step.
+8. Switch to steward role and confirm the guided scenario data appears across Dashboard, Evidence, Resources, and Rumors.
+9. Filter incidents by status, category, and minimum severity.
+10. Submit a short invalid report and confirm it is rejected without entering the offline queue.
+11. Toggle offline mode, submit a valid report, and confirm it appears in the browser queue.
+12. Toggle online mode, flush the queue, and confirm the accepted/rejected/still queued counts.
+13. Switch to coordinator role, run sync, and confirm pending counts clear.
+14. Confirm the coordinator sync view shows hub health, database status, queue counts, latest resource status, and last sync time.
+15. Confirm the sync preview shows redacted payload summaries and does not show raw report text or local evidence paths.
+16. Visit `/api/health` and confirm it reports `"database": "ok"`.
