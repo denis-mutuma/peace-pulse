@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -124,8 +125,8 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     init_db()
-    host = "0.0.0.0"
-    port = 8080
+    host = os.environ.get("PEACEPULSE_HOST", "0.0.0.0")
+    port = int(os.environ.get("PEACEPULSE_PORT", "8080"))
     print(f"PeacePulse edge hub listening on http://localhost:{port}")
     ThreadingHTTPServer((host, port), Handler).serve_forever()
 

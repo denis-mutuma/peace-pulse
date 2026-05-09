@@ -1,6 +1,7 @@
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "services" / "api"))
@@ -172,6 +173,21 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(stored["text"], "")
         self.assertNotEqual(stored["redacted_text"], "")
         self.assertIn("[redacted-name]", incident["redacted_text"])
+
+    def test_env_db_path_is_honored(self):
+        original_data_dir = core.DATA_DIR
+        original_db_path = core.DB_PATH
+        env_db = Path(self.tmp.name) / "env" / "peacepulse.db"
+        try:
+            with patch.dict("os.environ", {"PEACEPULSE_DB_PATH": str(env_db)}):
+                core.configure_from_env()
+                core.init_db()
+
+            self.assertEqual(core.DB_PATH, env_db)
+            self.assertTrue(env_db.exists())
+        finally:
+            core.DATA_DIR = original_data_dir
+            core.DB_PATH = original_db_path
 
 
 if __name__ == "__main__":

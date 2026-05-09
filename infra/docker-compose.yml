@@ -4,6 +4,10 @@ services:
       context: ..
       dockerfile: infra/python.Dockerfile
     command: uv run python services/api/server.py
+    environment:
+      PEACEPULSE_HOST: 0.0.0.0
+      PEACEPULSE_PORT: 8080
+      PEACEPULSE_DB_PATH: /app/data/peacepulse.db
     ports:
       - "8080:8080"
     volumes:

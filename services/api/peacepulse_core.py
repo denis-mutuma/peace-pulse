@@ -52,7 +52,15 @@ def connect() -> sqlite3.Connection:
     return con
 
 
+def configure_from_env() -> None:
+    global DATA_DIR, DB_PATH
+    if db_path := os.environ.get("PEACEPULSE_DB_PATH"):
+        DB_PATH = Path(db_path)
+        DATA_DIR = DB_PATH.parent
+
+
 def init_db() -> None:
+    configure_from_env()
     with connect() as con:
         con.executescript(
             """
