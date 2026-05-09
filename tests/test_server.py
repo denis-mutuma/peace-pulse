@@ -1,4 +1,5 @@
 import io
+import json
 import sys
 import tempfile
 import unittest
@@ -32,8 +33,21 @@ class StaticFileTests(unittest.TestCase):
         self.assertEqual(handler.wfile.getvalue(), b"index")
 
 
+class ApiRouteTests(unittest.TestCase):
+    def test_unknown_api_get_returns_404(self):
+        handler = FakeHandler()
+        handler.path = "/api/evidence"
+
+        server.Handler.do_GET(handler)
+
+        self.assertEqual(handler.status, 404)
+        self.assertEqual(json.loads(handler.wfile.getvalue()), {"error": "Route not found."})
+
+
 class FakeHandler:
     static = server.Handler.static
+    json = server.Handler.json
+    error = server.Handler.error
 
     def __init__(self):
         self.headers = []

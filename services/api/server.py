@@ -39,6 +39,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.json({"ok": True, "service": "peacepulse-edge"})
             elif path == "/api/incidents":
                 self.json(list_incidents())
+            elif path.startswith("/api/"):
+                self.error(404, "Route not found.")
             else:
                 self.static(path)
         except Exception as exc:
