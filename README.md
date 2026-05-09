@@ -1,6 +1,6 @@
 # PeacePulse Hub
 
-PeacePulse Hub is an offline-first anonymous reporting prototype for fragile and displaced communities. It runs as a local edge hub and supports report intake, deterministic redaction, human-reviewed triage, and a responder dashboard.
+PeacePulse Hub is an offline-first community resilience prototype for fragile and displaced communities. It runs as a local edge hub and supports anonymous report intake, deterministic redaction, human-reviewed triage, evidence protection, resource monitoring, rumor triage, and low-bandwidth sync simulation.
 
 ## Quick Start
 
@@ -35,17 +35,20 @@ uv run python -m unittest discover -s tests
 ## Demo Flow
 
 1. Submit an anonymous report about water-point tension.
-2. Review the redacted incident in the responder dashboard.
-3. Update the incident status as a responder.
-4. Toggle offline mode in the browser, submit another report, then go online and flush the queue.
+2. Upload supporting evidence metadata to the locker.
+3. Simulate resource sensor data for water-point pressure.
+4. Log a related rumor for steward review.
+5. Review the redacted incident in the responder dashboard.
+6. Toggle offline mode in the browser, submit another report, then go online and flush the queue.
+7. Switch to coordinator role and run sync.
 
 See [Manual Test Checklist](docs/manual-test.md) for a fuller smoke test.
 
 ## Services
 
 - `apps/web`: static offline-first PWA.
-- `services/api`: local edge API, SQLite schema, redaction, and triage.
-- `infra`: Docker Compose for the local API container.
+- `services/api`: local edge API, SQLite schema, redaction, triage, evidence, resources, rumors, and sync queue.
+- `infra`: Docker Compose and EC2 deployment notes.
 
 ## Safety Boundaries
 
