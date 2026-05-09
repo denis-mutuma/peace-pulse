@@ -12,6 +12,7 @@ from peacepulse_core import (
     health_status,
     init_db,
     list_incidents,
+    list_status_history,
     public_report,
     triage_report,
     update_incident_status,
@@ -40,6 +41,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/health":
                 self.json(health_status())
+            elif path.endswith("/history") and path.startswith("/api/incidents/"):
+                incident_id = path.split("/")[3]
+                self.json(list_status_history(incident_id))
             elif path == "/api/incidents":
                 self.json(list_incidents())
             elif path.startswith("/api/"):
@@ -70,7 +74,7 @@ class Handler(BaseHTTPRequestHandler):
             body = self.body()
             if path.endswith("/status") and path.startswith("/api/incidents/"):
                 incident_id = path.split("/")[3]
-                self.json(update_incident_status(incident_id, body.get("status", "")))
+                self.json(update_incident_status(incident_id, body.get("status", ""), body.get("actor_label", "responder")))
             else:
                 self.error(404, "Route not found.")
         except ValueError as exc:

@@ -111,6 +111,26 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(handler.status, 400)
         self.assertEqual(json.loads(handler.wfile.getvalue()), {"error": "Request body is too large."})
 
+    def test_status_history_endpoint_returns_events(self):
+        with isolated_core_db(self.tmp.name):
+            report = core.create_report({"text": "Families are turned away after long water queues."})
+            incident = core.triage_report(report["id"])
+            patch = FakeHandler(
+                path=f"/api/incidents/{incident['id']}/status",
+                body={"status": "assigned", "actor_label": "shift lead"},
+            )
+            server.Handler.do_PATCH(patch)
+            handler = FakeHandler(path=f"/api/incidents/{incident['id']}/history")
+
+            server.Handler.do_GET(handler)
+
+        payload = json.loads(handler.wfile.getvalue())
+        self.assertEqual(handler.status, 200)
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["previous_status"], "new")
+        self.assertEqual(payload[0]["new_status"], "assigned")
+        self.assertEqual(payload[0]["actor_label"], "shift lead")
+
 
 class FakeHandler:
     body = server.Handler.body
