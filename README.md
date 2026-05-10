@@ -40,12 +40,13 @@ uv run python -m unittest discover -s tests
 
 1. Use a guided report tile to load a low-literacy starter report.
 2. Add a phone number or exact block to show the active privacy warning, then remove it.
-3. Open the Demo tab and run the guided water-point scenario.
-4. Review the redacted incident in the responder dashboard.
-5. Check the evidence hash/custody record and resource anomaly.
-6. Review the related rumor cluster for steward notes.
-7. Toggle offline mode in the browser, submit another report, then go online and flush the queue.
-8. Switch to coordinator role, inspect the node health/sync preview, and run sync.
+3. Attach an optional short audio note to show voice intake as linked evidence.
+4. Open the Demo tab and run the guided water-point scenario.
+5. Review the redacted incident in the responder dashboard.
+6. Check the evidence hash/custody record and resource anomaly.
+7. Review the related rumor cluster for steward notes.
+8. Toggle offline mode in the browser, submit another report, then go online and flush the queue.
+9. Switch to coordinator role, inspect the node health/sync preview, and run sync.
 
 See [Manual Test Checklist](docs/manual-test.md) for a fuller smoke test.
 
@@ -92,6 +93,14 @@ Recommended rehearsal order after reset:
 The Report tab includes low-literacy guided tiles for the main concern types. Each tile fills the report category, a rough location, and a safe starter sentence that avoids names, phone numbers, and exact homes.
 
 The browser also checks the report text for likely sensitive details before submission. Phone numbers, email addresses, ID-like values, exact block/unit locations, and titled names trigger a warning panel. The warning does not block reporting; it gives the community member a chance to remove identifying details while the backend still performs deterministic redaction during triage.
+
+Reports can include an optional audio note. Voice files are handled through the evidence locker: the hub validates the file type and size, hashes the bytes, stores encrypted local evidence, links the metadata to the report timeline, and syncs metadata only when the submitter allows it. Offline browser queueing stores text reports only, so voice notes should be added while the hub is reachable.
+
+Voice-note boundaries:
+
+- Keep recordings short and focused on the concern.
+- Avoid speaking names, phone numbers, or exact shelters.
+- Treat voice bytes as local evidence, not coordinator sync content.
 
 ## Services
 

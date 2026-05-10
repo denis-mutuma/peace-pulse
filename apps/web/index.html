@@ -93,6 +93,13 @@
             <label class="wide">What happened?
               <textarea name="text" rows="5" minlength="8" maxlength="2000" required>There is tension at the main water point because some families are being turned away.</textarea>
             </label>
+            <label class="wide">Optional voice note
+              <input name="voice_note" type="file" accept="audio/*" />
+            </label>
+            <label class="check wide">
+              <input type="checkbox" name="voice_sync_allowed" />
+              Allow voice-note metadata to sync after local encryption
+            </label>
             <p id="textCount" class="counter wide">0 / 2000 characters</p>
             <p class="notice wide">Avoid names, exact homes, phone numbers, or details that could expose someone.</p>
             <div id="riskWarning" class="riskWarning wide" hidden role="status"></div>

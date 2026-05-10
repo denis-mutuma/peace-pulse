@@ -272,6 +272,27 @@ class CoreTests(unittest.TestCase):
         self.assertTrue({"triage", "status", "note", "evidence", "resource", "rumor"}.issubset(kinds))
         self.assertNotIn("demo", json.dumps(timeline))
 
+    def test_voice_note_metadata_links_to_incident_timeline(self):
+        report = core.create_report({"text": "Families are turned away after long water queues."})
+        incident = core.triage_report(report["id"])
+        core.create_evidence(
+            {
+                "filename": "voice-note.webm",
+                "mime_type": "audio/webm",
+                "content_base64": base64.b64encode(b"demo voice note").decode("ascii"),
+                "linked_report_id": report["id"],
+                "sync_allowed": True,
+            }
+        )
+
+        timeline = core.incident_timeline(incident["id"])
+        evidence_events = [item for item in timeline if item["kind"] == "evidence"]
+        payload = json.loads(core.rows("SELECT payload FROM sync_queue WHERE item_type = ?", ("evidence_record",))[0]["payload"])
+
+        self.assertEqual(evidence_events[0]["title"], "voice-note.webm")
+        self.assertEqual(payload["linked_report_id"], report["id"])
+        self.assertNotIn("encrypted_path", payload)
+
     def test_purge_triaged_report_text_keeps_incident_available(self):
         sensitive_text = "Mr. Kamau says call +254 700 000 000 about the blocked clinic queue."
         report = core.create_report(

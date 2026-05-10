@@ -110,6 +110,13 @@ function formData(form) {
   return Object.fromEntries(new FormData(form).entries());
 }
 
+function reportPayload(form) {
+  const payload = formData(form);
+  delete payload.voice_note;
+  delete payload.voice_sync_allowed;
+  return payload;
+}
+
 function setResult(text) {
   $("#reportResult").textContent = text;
 }
@@ -201,10 +208,21 @@ function renderPhrasebook() {
 async function submitReport(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  const payload = formData(form);
+  const payload = reportPayload(form);
+  const voiceFile = form.elements.voice_note.files[0];
   try {
+    if (voiceFile) validateVoiceNote(voiceFile);
     const result = await api("/api/reports", { method: "POST", body: payload });
-    setResult(`Submitted and triaged as ${result.incident.category} with severity ${result.incident.severity}.`);
+    let voiceMessage = "";
+    if (voiceFile) {
+      try {
+        await uploadVoiceNote(result.report.id, voiceFile, form.elements.voice_sync_allowed.checked);
+        voiceMessage = " Voice note stored as linked local evidence.";
+      } catch (voiceError) {
+        voiceMessage = ` Voice note was not stored: ${voiceError.message}`;
+      }
+    }
+    setResult(`Submitted and triaged as ${result.incident.category} with severity ${result.incident.severity}.${voiceMessage}`);
     form.reset();
     form.elements.text.value = "";
     updateTextCount();
@@ -212,9 +230,36 @@ async function submitReport(event) {
   } catch (error) {
     if (error.queueable) {
       saveQueue([...queue(), { id: newLocalId(), queued_at: new Date().toISOString(), payload }]);
+      if (voiceFile) {
+        setResult(`${error.message} Text report queued; voice notes require the hub to be online.`);
+        return;
+      }
     }
     setResult(error.message);
   }
+}
+
+function validateVoiceNote(file) {
+  if (file.size > MAX_EVIDENCE_BYTES) {
+    throw new Error("Voice note must be 2 MB or smaller.");
+  }
+  if (!file.type.startsWith("audio/")) {
+    throw new Error("Voice note must be an audio file.");
+  }
+}
+
+async function uploadVoiceNote(reportId, file, syncAllowed) {
+  const content_base64 = await readAsDataUrl(file);
+  await api("/api/evidence", {
+    method: "POST",
+    body: {
+      filename: file.name || "voice-note.webm",
+      mime_type: file.type,
+      content_base64,
+      linked_report_id: reportId,
+      sync_allowed: syncAllowed,
+    },
+  });
 }
 
 const demoPayloads = {
@@ -515,6 +560,7 @@ async function loadEvidence() {
       <span class="badge">${item.size_bytes} bytes</span>
       <span class="badge">${item.sync_allowed ? "sync allowed" : "local only"}</span>
       <p><strong>SHA-256:</strong> ${escapeHtml(item.sha256.slice(0, 24))}...</p>
+      <p>${item.linked_report_id ? `Linked report: ${escapeHtml(item.linked_report_id)}` : "Unlinked evidence record"}</p>
       <p>${item.custody.map((event) => escapeHtml(event.action)).join("<br>")}</p>
     </article>
   `).join("") || `<p class="empty">No evidence records yet.</p>`;
