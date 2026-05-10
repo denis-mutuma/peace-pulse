@@ -36,6 +36,8 @@ Evidence uploads are capped at 2 MB and limited to image, audio, text, or PDF co
 uv run python -m unittest discover -s tests
 ```
 
+The suite includes standard-library API tests plus headless browser smoke tests for the PWA. Browser tests launch Chromium when `chromium`, `chromium-browser`, or `google-chrome` is available; otherwise they skip with a clear unittest message.
+
 ## Demo Flow
 
 1. Use a guided report tile to load a low-literacy starter report.
