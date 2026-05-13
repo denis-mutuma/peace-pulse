@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import re
+import hashlib
+import math
 from collections import Counter
 from dataclasses import dataclass
 from typing import Any
@@ -81,13 +83,19 @@ class RetrievalHit:
     category: str
     score: float
     excerpt: str
+    retrieval_method: str = "local_tfidf_cosine"
 
 
 def ensure_seed_runbooks(db: Session, org_id: str | None = None) -> None:
-    existing = {row.id for row in db.scalars(select(models.CopilotRunbook).where(models.CopilotRunbook.organization_id.is_(None)))}
+    existing_rows = {row.id: row for row in db.scalars(select(models.CopilotRunbook).where(models.CopilotRunbook.organization_id.is_(None)))}
     changed = False
     for item in SEED_RUNBOOKS:
-        if item["id"] in existing:
+        existing = existing_rows.get(item["id"])
+        if existing:
+            if not existing.embedding_json or not existing.content_hash:
+                existing.embedding_json = json.dumps(_vectorize(_runbook_text(existing.title, existing.category, json.loads(existing.tags_json), existing.content)))
+                existing.content_hash = _content_hash(existing.content)
+                changed = True
             continue
         db.add(
             models.CopilotRunbook(
@@ -98,6 +106,8 @@ def ensure_seed_runbooks(db: Session, org_id: str | None = None) -> None:
                 content=item["content"],
                 tags_json=json.dumps(item["tags"]),
                 source="seed",
+                embedding_json=json.dumps(_vectorize(_runbook_text(item["title"], item["category"], item["tags"], item["content"]))),
+                content_hash=_content_hash(item["content"]),
             )
         )
         changed = True
@@ -116,16 +126,44 @@ def list_runbooks(db: Session, org_id: str) -> list[dict[str, Any]]:
 
 
 def create_runbook(db: Session, org_id: str, payload: Any) -> dict[str, Any]:
+    tags = [tag.strip().lower()[:40] for tag in payload.tags if tag.strip()]
+    content = redact(payload.content.strip())
+    category = payload.category.strip().lower() or "operations"
+    title = payload.title.strip()
     runbook = models.CopilotRunbook(
         id=new_id("rb"),
         organization_id=org_id,
-        title=payload.title.strip(),
-        category=payload.category.strip().lower() or "operations",
-        content=redact(payload.content.strip()),
-        tags_json=json.dumps([tag.strip().lower()[:40] for tag in payload.tags if tag.strip()]),
+        title=title,
+        category=category,
+        content=content,
+        tags_json=json.dumps(tags),
         source=payload.source.strip() or "manual",
+        embedding_json=json.dumps(_vectorize(_runbook_text(title, category, tags, content))),
+        content_hash=_content_hash(content),
     )
     db.add(runbook)
+    db.commit()
+    db.refresh(runbook)
+    return _runbook_out(runbook)
+
+
+def update_runbook(db: Session, org_id: str, runbook_id: str, payload: Any) -> dict[str, Any]:
+    runbook = db.get(models.CopilotRunbook, runbook_id)
+    if not runbook or runbook.organization_id != org_id:
+        raise ValueError("Editable runbook not found.")
+    if payload.title is not None:
+        runbook.title = payload.title.strip()
+    if payload.category is not None:
+        runbook.category = payload.category.strip().lower() or "operations"
+    if payload.content is not None:
+        runbook.content = redact(payload.content.strip())
+    if payload.tags is not None:
+        runbook.tags_json = json.dumps([tag.strip().lower()[:40] for tag in payload.tags if tag.strip()])
+    if payload.source is not None:
+        runbook.source = payload.source.strip() or "manual"
+    tags = json.loads(runbook.tags_json)
+    runbook.embedding_json = json.dumps(_vectorize(_runbook_text(runbook.title, runbook.category, tags, runbook.content)))
+    runbook.content_hash = _content_hash(runbook.content)
     db.commit()
     db.refresh(runbook)
     return _runbook_out(runbook)
@@ -225,15 +263,14 @@ def retrieve_context(db: Session, org_id: str, query: str, limit: int = 5) -> li
             )
         )
     )
-    query_counts = Counter(_tokens(query))
+    query_vector = _vectorize(query)
     hits: list[RetrievalHit] = []
     for runbook in runbooks:
-        haystack = f"{runbook.title} {runbook.category} {runbook.tags_json} {runbook.content}"
-        counts = Counter(_tokens(haystack))
-        score = float(sum(query_counts[token] * counts[token] for token in query_counts))
+        vector = _stored_vector(runbook)
+        score = _cosine(query_vector, vector)
         if score <= 0:
             continue
-        hits.append(RetrievalHit(runbook.id, runbook.title, runbook.category, score, runbook.content[:260]))
+        hits.append(RetrievalHit(runbook.id, runbook.title, runbook.category, round(score, 4), runbook.content[:260]))
     return sorted(hits, key=lambda hit: hit.score, reverse=True)[:limit]
 
 
@@ -272,6 +309,8 @@ def _runbook_out(runbook: models.CopilotRunbook) -> dict[str, Any]:
         "source": runbook.source,
         "tags": json.loads(runbook.tags_json),
         "excerpt": runbook.content[:220],
+        "content": runbook.content,
+        "retrieval_method": "local_tfidf_cosine",
         "created_at": runbook.created_at,
     }
 
@@ -332,8 +371,45 @@ def _citation(hit: RetrievalHit) -> dict[str, Any]:
         "category": hit.category,
         "score": hit.score,
         "excerpt": hit.excerpt,
+        "retrieval_method": hit.retrieval_method,
     }
 
 
 def _tokens(text: str) -> list[str]:
     return [token.lower() for token in re.findall(r"[a-zA-Z0-9_]+", text)]
+
+
+def _runbook_text(title: str, category: str, tags: list[str], content: str) -> str:
+    return f"{title} {category} {' '.join(tags)} {content}"
+
+
+def _vectorize(text: str) -> dict[str, float]:
+    counts = Counter(token for token in _tokens(text) if len(token) > 2)
+    total = sum(counts.values()) or 1
+    return {token: round(count / total, 6) for token, count in counts.items()}
+
+
+def _stored_vector(runbook: models.CopilotRunbook) -> dict[str, float]:
+    try:
+        vector = json.loads(runbook.embedding_json or "{}")
+    except json.JSONDecodeError:
+        vector = {}
+    if vector:
+        return {str(key): float(value) for key, value in vector.items()}
+    tags = json.loads(runbook.tags_json)
+    return _vectorize(_runbook_text(runbook.title, runbook.category, tags, runbook.content))
+
+
+def _cosine(left: dict[str, float], right: dict[str, float]) -> float:
+    numerator = sum(left.get(token, 0.0) * right.get(token, 0.0) for token in left)
+    if numerator <= 0:
+        return 0.0
+    left_norm = math.sqrt(sum(value * value for value in left.values()))
+    right_norm = math.sqrt(sum(value * value for value in right.values()))
+    if left_norm == 0 or right_norm == 0:
+        return 0.0
+    return numerator / (left_norm * right_norm)
+
+
+def _content_hash(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()

@@ -364,6 +364,7 @@ class ProductionApiTests(unittest.TestCase):
         runbooks = self.client.get("/api/v1/copilot/runbooks", headers=headers)
         self.assertEqual(runbooks.status_code, 200, runbooks.text)
         self.assertTrue(any(item["id"] == "rb_resource_pressure" for item in runbooks.json()))
+        self.assertTrue(all(item["retrieval_method"] == "local_tfidf_cosine" for item in runbooks.json()))
 
         investigation = self.client.post(f"/api/v1/copilot/incidents/{report['incident_id']}/investigate", headers=headers, json={})
         self.assertEqual(investigation.status_code, 200, investigation.text)
@@ -400,6 +401,50 @@ class ProductionApiTests(unittest.TestCase):
         self.assertEqual(sync_preview.status_code, 200, sync_preview.text)
         self.assertNotIn("What should responders do next?", json.dumps(sync_preview.json()))
         self.assertNotIn("Top recommendation", json.dumps(sync_preview.json()))
+
+    def test_copilot_runbook_editing_and_vector_retrieval(self):
+        boot = self.bootstrap()
+        login = self.client.post(
+            "/api/v1/auth/login",
+            json={"email": "admin@example.org", "password": "change-this-password"},
+        )
+        headers = {"authorization": f"Bearer {login.json()['access_token']}"}
+        created = self.client.post(
+            "/api/v1/copilot/runbooks",
+            headers=headers,
+            json={
+                "title": "Shade Queue Mediation",
+                "category": "resource",
+                "content": "When shade tents are missing near water queues, assign a steward to separate urgent hydration support from routine queue mediation.",
+                "tags": ["shade", "queue", "hydration"],
+            },
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+
+        patched = self.client.patch(
+            f"/api/v1/copilot/runbooks/{created.json()['id']}",
+            headers=headers,
+            json={"content": "When shade tents or hydration points are missing, assign a steward owner and publish a coarse non-identifying service update."},
+        )
+        self.assertEqual(patched.status_code, 200, patched.text)
+        self.assertIn("hydration points", patched.json()["content"])
+
+        session = self.client.post(
+            "/api/v1/copilot/sessions",
+            headers=headers,
+            json={"title": "Shade queue review"},
+        )
+        self.assertEqual(session.status_code, 201, session.text)
+        reply = self.client.post(
+            f"/api/v1/copilot/sessions/{session.json()['id']}/messages",
+            headers=headers,
+            json={"content": "What should we do about missing shade tents and hydration points?"},
+        )
+        self.assertEqual(reply.status_code, 200, reply.text)
+        citations = reply.json()["messages"][-1]["citations"]
+        self.assertTrue(citations)
+        self.assertEqual(citations[0]["document_id"], created.json()["id"])
+        self.assertEqual(citations[0]["retrieval_method"], "local_tfidf_cosine")
 
     def test_mfa_enrollment_then_login_requires_totp(self):
         token = self.token()

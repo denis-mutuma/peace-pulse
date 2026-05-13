@@ -367,6 +367,23 @@ h3 {
   grid-column: 1 / -1;
 }
 
+.form.compact {
+  grid-template-columns: 1fr;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.linkButton {
+  min-height: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+}
+
 .form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

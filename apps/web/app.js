@@ -1044,13 +1044,53 @@ async function loadCopilot() {
   `).join("") || `<option value="">No incidents available</option>`;
   const runbooks = await staffApi("/copilot/runbooks");
   $("#copilotRunbooks").innerHTML = runbooks.map((item) => `
-    <p><strong>${escapeHtml(item.title)}</strong><br>${escapeHtml(item.category)} · ${escapeHtml(item.tags.join(", "))}</p>
+    <p>
+      <strong>${escapeHtml(item.title)}</strong><br>
+      ${escapeHtml(item.category)} · ${escapeHtml(item.tags.join(", "))}<br>
+      <span class="muted">${escapeHtml(item.retrieval_method)}</span>
+      ${item.source === "seed" ? "" : `<br><button type="button" class="linkButton" data-edit-runbook="${escapeHtml(item.id)}">Edit</button>`}
+    </p>
   `).join("") || `<p class="empty">No runbooks yet.</p>`;
+  $$("[data-edit-runbook]").forEach((button) => {
+    const item = runbooks.find((runbook) => runbook.id === button.dataset.editRunbook);
+    button.addEventListener("click", () => fillRunbookForm(item));
+  });
   if (state.copilotSessionId) {
     await loadCopilotSession(state.copilotSessionId).catch(() => {
       state.copilotSessionId = "";
       localStorage.removeItem("peacepulse-copilot-session");
     });
+  }
+}
+
+function fillRunbookForm(item) {
+  if (!item) return;
+  const form = $("#copilotRunbookForm");
+  form.elements.id.value = item.id;
+  form.elements.title.value = item.title;
+  form.elements.category.value = item.category;
+  form.elements.tags.value = item.tags.join(", ");
+  form.elements.content.value = item.content;
+}
+
+async function saveCopilotRunbook(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const body = formData(form);
+  const runbookId = body.id;
+  delete body.id;
+  body.tags = body.tags.split(",").map((tag) => tag.trim()).filter(Boolean);
+  body.source = "manual";
+  const path = runbookId ? `/copilot/runbooks/${runbookId}` : "/copilot/runbooks";
+  const method = runbookId ? "PATCH" : "POST";
+  try {
+    await staffApi(path, { method, body });
+    $("#copilotResult").textContent = runbookId ? "Runbook updated." : "Runbook added.";
+    form.reset();
+    form.elements.id.value = "";
+    await loadCopilot();
+  } catch (error) {
+    $("#copilotResult").textContent = error.message;
   }
 }
 
@@ -1279,6 +1319,7 @@ function bind() {
   $("#reportExploitation").addEventListener("click", prepareExploitationReport);
   $("#rumorForm").addEventListener("submit", submitRumor);
   $("#refreshCopilot").addEventListener("click", loadCopilot);
+  $("#copilotRunbookForm").addEventListener("submit", saveCopilotRunbook);
   $("#copilotInvestigateForm").addEventListener("submit", investigateCopilot);
   $("#newCopilotSession").addEventListener("click", newCopilotSession);
   $("#copilotChatForm").addEventListener("submit", sendCopilotMessage);

@@ -251,6 +251,14 @@ class CopilotRunbookCreate(BaseModel):
     source: str = Field(default="manual", max_length=80)
 
 
+class CopilotRunbookPatch(BaseModel):
+    title: str | None = Field(default=None, min_length=4, max_length=160)
+    category: str | None = Field(default=None, max_length=60)
+    content: str | None = Field(default=None, min_length=20, max_length=6000)
+    tags: list[str] | None = Field(default=None, max_length=12)
+    source: str | None = Field(default=None, max_length=80)
+
+
 class CopilotRunbookOut(BaseModel):
     id: str
     title: str
@@ -258,6 +266,8 @@ class CopilotRunbookOut(BaseModel):
     source: str
     tags: list[str]
     excerpt: str
+    content: str
+    retrieval_method: str
     created_at: datetime
 
 
@@ -267,6 +277,7 @@ class CopilotCitation(BaseModel):
     category: str
     score: float
     excerpt: str
+    retrieval_method: str
 
 
 class CopilotInvestigationOut(BaseModel):

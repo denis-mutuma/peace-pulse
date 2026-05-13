@@ -23,6 +23,7 @@ from .schemas import (
     CopilotInvestigationOut,
     CopilotRunbookCreate,
     CopilotRunbookOut,
+    CopilotRunbookPatch,
     CopilotSessionCreate,
     CopilotSessionOut,
     EvidenceContentResponse,
@@ -443,6 +444,19 @@ async def create_copilot_runbook(
     principal: Annotated[Principal, Depends(require_role("coordinator", "org_admin", "system_admin"))],
 ) -> dict[str, object]:
     return copilot.create_runbook(db, principal.primary_org_id, payload)
+
+
+@app.patch("/api/v1/copilot/runbooks/{runbook_id}", response_model=CopilotRunbookOut)
+async def update_copilot_runbook(
+    runbook_id: str,
+    payload: CopilotRunbookPatch,
+    db: Annotated[Session, Depends(get_db)],
+    principal: Annotated[Principal, Depends(require_role("coordinator", "org_admin", "system_admin"))],
+) -> dict[str, object]:
+    try:
+        return copilot.update_runbook(db, principal.primary_org_id, runbook_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
 
 
 @app.post("/api/v1/copilot/incidents/{incident_id}/investigate", response_model=CopilotInvestigationOut)

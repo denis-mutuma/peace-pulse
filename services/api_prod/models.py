@@ -195,6 +195,8 @@ class CopilotRunbook(TimestampMixin, Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     tags_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     source: Mapped[str] = mapped_column(String(80), default="seed", nullable=False)
+    embedding_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), default="", nullable=False)
 
 
 class CopilotSession(TimestampMixin, Base):

@@ -431,6 +431,22 @@
               <aside class="panel sidePanel">
                 <h2>Runbooks</h2>
                 <p class="sectionSub">Local operational context used for retrieval.</p>
+                <form id="copilotRunbookForm" class="form compact">
+                  <input name="id" type="hidden" />
+                  <label>Title
+                    <input name="title" value="Local mediation checklist" minlength="4" maxlength="160" required />
+                  </label>
+                  <label>Category
+                    <input name="category" value="resource" maxlength="60" />
+                  </label>
+                  <label class="wide">Tags
+                    <input name="tags" value="water, mediation, steward" />
+                  </label>
+                  <label class="wide">Runbook content
+                    <textarea name="content" rows="4" minlength="20" maxlength="6000" required>Verify service-point status, assign a steward owner, keep public updates coarse, and avoid names or exact shelters.</textarea>
+                  </label>
+                  <button type="submit">Save runbook</button>
+                </form>
                 <div id="copilotRunbooks" class="queueList"></div>
               </aside>
             </div>
