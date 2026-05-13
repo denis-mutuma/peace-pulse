@@ -521,7 +521,8 @@ const demoActions = {
   async evidence() {
     const siteId = currentSiteId();
     const text = "Steward note: queue pressure and allegations of favoritism need mediation review.";
-    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+    const file = new File([text], demoPayloads.evidence.filename, { type: demoPayloads.evidence.mime_type });
+    const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
     const sha256 = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
     const result = await staffApi("/evidence/uploads", {
       method: "POST",
@@ -529,12 +530,13 @@ const demoActions = {
         site_id: siteId,
         filename: demoPayloads.evidence.filename,
         mime_type: demoPayloads.evidence.mime_type,
-        size_bytes: text.length,
+        size_bytes: file.size,
         sha256,
         sync_allowed: true,
       },
     });
-    return `Evidence metadata created for ${result.object_key}.`;
+    await staffRaw(result.upload_url, file, result.headers);
+    return `Evidence stored for ${result.object_key}.`;
   },
   async resource() {
     const result = await staffApi("/resources/events", { method: "POST", body: { ...demoPayloads.resource, site_id: currentSiteId() } });
@@ -555,6 +557,36 @@ async function runDemoStep(action) {
     addDemoLog(action, message);
     setDemoResult(message);
     await refreshAll();
+  } catch (error) {
+    setDemoResult(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function runJudgeDemo() {
+  const button = $("#runJudgeDemo");
+  button.disabled = true;
+  setDemoResult("Running judge demo path...");
+  try {
+    for (const action of ["report", "evidence", "resource", "rumor"]) {
+      const message = await demoActions[action]();
+      addDemoLog(action, message);
+    }
+    await refreshAll();
+    activateView("copilot");
+    await loadCopilot();
+    const incidentId = $("#copilotIncidentSelect").value;
+    if (incidentId) {
+      const result = await staffApi(`/copilot/incidents/${incidentId}/investigate`, { method: "POST", body: {} });
+      renderCopilotInvestigation(result);
+      addDemoLog("copilot", `Copilot cited ${result.citations.length} runbook${result.citations.length === 1 ? "" : "s"}.`);
+    }
+    if (hasCoordinatorAccess()) {
+      await loadSync();
+      addDemoLog("sync", "Coordinator sync preview refreshed with metadata-only records.");
+    }
+    setDemoResult("Judge demo path complete: report, evidence, resource anomaly, rumor, Copilot, and sync preview are ready.");
   } catch (error) {
     setDemoResult(error.message);
   } finally {
@@ -1328,6 +1360,7 @@ function bind() {
   $("#runSync").addEventListener("click", runSync);
   $("#refreshPrivacy").addEventListener("click", loadPrivacyAudit);
   $("#resetDemo").addEventListener("click", resetDemoLog);
+  $("#runJudgeDemo").addEventListener("click", runJudgeDemo);
   $("#clearDemoState").addEventListener("click", clearDemoState);
   $$("[data-demo-action]").forEach((button) => {
     button.addEventListener("click", () => runDemoStep(button.dataset.demoAction));
@@ -1360,6 +1393,12 @@ function activateView(view) {
 }
 
 if ("serviceWorker" in navigator) {
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (refreshing) return;
+    refreshing = true;
+    window.location.reload();
+  });
   navigator.serviceWorker.register("/sw.js").catch(() => {});
 }
 

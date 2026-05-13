@@ -358,6 +358,43 @@ class BrowserSmokeTests(unittest.TestCase):
         self.assertNotIn("+254 700 000 000", result["routeText"])
         self.assertNotIn("+254 700 000 000", result["workText"])
 
+    def test_mobile_workspace_has_no_horizontal_overflow(self):
+        self.browser.command(
+            "Emulation.setDeviceMetricsOverride",
+            {"width": 390, "height": 844, "deviceScaleFactor": 2, "mobile": True},
+        )
+        try:
+            self.navigate("/")
+            result = self.evaluate(
+                """
+                (async () => {
+                  const views = ["report", "dashboard", "evidence", "copilot", "demo", "sync"];
+                  const measurements = [];
+                  for (const view of views) {
+                    const tab = document.querySelector(`[data-view="${view}"]`);
+                    if (!tab || tab.hidden) continue;
+                    tab.click();
+                    await new Promise((resolve) => setTimeout(resolve, 80));
+                    measurements.push({
+                      view,
+                      scrollWidth: document.documentElement.scrollWidth,
+                      clientWidth: document.documentElement.clientWidth,
+                      activeText: document.querySelector(".view.active")?.textContent || ""
+                    });
+                  }
+                  return measurements;
+                })()
+                """,
+                timeout=6,
+            )
+        finally:
+            self.browser.command("Emulation.clearDeviceMetricsOverride")
+
+        self.assertTrue(result)
+        for item in result:
+            self.assertLessEqual(item["scrollWidth"], item["clientWidth"] + 2, item)
+            self.assertTrue(item["activeText"].strip(), item)
+
 
 SMOKE_HELPERS = """
 function waitForSmoke(predicate, timeout = 3000) {
