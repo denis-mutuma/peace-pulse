@@ -5,7 +5,7 @@ from typing import Annotated
 
 import hmac
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -25,6 +25,7 @@ from .schemas import (
     CopilotRunbookOut,
     CopilotSessionCreate,
     CopilotSessionOut,
+    EvidenceContentResponse,
     EvidenceUploadRequest,
     EvidenceUploadResponse,
     IncidentOut,
@@ -71,7 +72,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"] if settings.env != "production" else [],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+    allow_methods=["GET", "POST", "PATCH", "PUT", "OPTIONS"],
     allow_headers=["authorization", "content-type", "x-hub-id", "x-hub-signature"],
 )
 
@@ -281,6 +282,29 @@ async def create_evidence_upload(
     )
 
 
+@app.put("/api/v1/evidence/uploads/{evidence_id}/content", response_model=EvidenceContentResponse)
+async def upload_evidence_content(
+    evidence_id: str,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    principal: Annotated[Principal, Depends(require_role("steward", "coordinator", "org_admin"))],
+) -> EvidenceContentResponse:
+    record = db.get(models.EvidenceRecord, evidence_id)
+    if not record or record.organization_id not in principal.organization_ids:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Evidence record not found.")
+    require_site_access(db, principal, record.site_id)
+    content = await request.body()
+    updated = services.store_evidence_content(db, record, content, request.headers.get("content-type", ""))
+    return EvidenceContentResponse(
+        id=updated.id,
+        object_key=updated.object_key,
+        storage_status=updated.storage_status,
+        sha256=updated.sha256,
+        size_bytes=updated.size_bytes,
+        stored_size_bytes=updated.stored_size_bytes,
+    )
+
+
 @app.get("/api/v1/evidence")
 async def list_evidence(
     db: Annotated[Session, Depends(get_db)],
@@ -302,6 +326,9 @@ async def list_evidence(
             "size_bytes": item.size_bytes,
             "object_key": item.object_key,
             "sync_allowed": item.sync_allowed,
+            "linked_report_id": item.linked_report_id,
+            "storage_status": item.storage_status,
+            "stored_size_bytes": item.stored_size_bytes,
         }
         for item in records
     ]

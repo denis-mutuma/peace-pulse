@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -31,7 +33,7 @@ from .schemas import (
     RumorCreate,
     SyncBatchIn,
 )
-from .security import hash_password, hash_token, make_token_urlsafe, new_id
+from .security import hash_password, hash_token, make_token_urlsafe, new_id, now_utc
 
 def require(condition: bool, message: str, code: int = status.HTTP_400_BAD_REQUEST) -> None:
     if not condition:
@@ -166,7 +168,7 @@ def update_incident_status(db: Session, user: models.User, incident: models.Inci
 
 def create_evidence_upload(db: Session, org_id: str, payload: EvidenceUploadRequest) -> models.EvidenceRecord:
     require(any(payload.mime_type.startswith(prefix) for prefix in ALLOWED_EVIDENCE_MIME_PREFIXES), "Evidence file type is not supported.")
-    object_key = f"{org_id}/{payload.site_id}/{new_id('evd')}-{payload.filename}"
+    object_key = f"{org_id}/{payload.site_id}/{new_id('evd')}-{_safe_filename(payload.filename)}"
     record = models.EvidenceRecord(
         id=new_id("evd"),
         organization_id=org_id,
@@ -186,12 +188,105 @@ def create_evidence_upload(db: Session, org_id: str, payload: EvidenceUploadRequ
     return record
 
 
+def store_evidence_content(db: Session, record: models.EvidenceRecord, content: bytes, content_type: str) -> models.EvidenceRecord:
+    require(record.retention_status == "active", "Evidence record is not active.", status.HTTP_409_CONFLICT)
+    require(record.storage_status in {"pending", "stored"}, "Evidence record cannot accept content.", status.HTTP_409_CONFLICT)
+    require(content_type.split(";")[0].strip().startswith(record.mime_type.split(";")[0].strip()), "Evidence content type does not match metadata.")
+    require(len(content) == record.size_bytes, "Evidence content size does not match metadata.")
+    digest = hashlib.sha256(content).hexdigest()
+    require(digest == record.sha256, "Evidence content hash does not match metadata.")
+
+    stripped = strip_evidence_metadata(record.mime_type, content)
+    encrypted = _xor_evidence_bytes(stripped)
+    target = _evidence_storage_path(record)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(encrypted)
+    record.storage_status = "stored"
+    record.stored_size_bytes = len(encrypted)
+    record.stored_at = now_utc()
+    audit(db, record.organization_id, record.site_id, None, "evidence.content.stored", "evidence", record.id, "Evidence bytes stored encrypted at local edge.")
+    db.commit()
+    db.refresh(record)
+    return record
+
+
+def evidence_content_exists(record: models.EvidenceRecord) -> bool:
+    return _evidence_storage_path(record).exists()
+
+
 def evidence_upload_url(record: models.EvidenceRecord) -> str:
     settings = get_settings()
     if settings.s3_endpoint_url:
         return f"{settings.s3_endpoint_url.rstrip('/')}/{settings.s3_bucket}/{record.object_key}"
     settings.evidence_storage_dir.mkdir(parents=True, exist_ok=True)
-    return f"local://{record.object_key}"
+    return f"/api/v1/evidence/uploads/{record.id}/content"
+
+
+def strip_evidence_metadata(mime_type: str, content: bytes) -> bytes:
+    if mime_type == "image/jpeg":
+        return _strip_jpeg_metadata(content)
+    if mime_type == "image/png":
+        return _strip_png_metadata(content)
+    return content
+
+
+def _safe_filename(filename: str) -> str:
+    name = filename.replace("\\", "/").split("/")[-1].strip()
+    name = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip(".-")
+    return name[:120] or "evidence.bin"
+
+
+def _evidence_storage_path(record: models.EvidenceRecord):
+    settings = get_settings()
+    return settings.evidence_storage_dir / f"{record.object_key}.enc"
+
+
+def _xor_evidence_bytes(content: bytes) -> bytes:
+    key = hashlib.sha256(get_settings().jwt_secret.encode("utf-8")).digest()
+    return bytes(byte ^ key[index % len(key)] for index, byte in enumerate(content))
+
+
+def _strip_jpeg_metadata(content: bytes) -> bytes:
+    if not content.startswith(b"\xff\xd8"):
+        return content
+    output = bytearray(content[:2])
+    index = 2
+    while index + 4 <= len(content):
+        if content[index] != 0xFF:
+            output.extend(content[index:])
+            break
+        marker = content[index + 1]
+        if marker in {0xDA, 0xD9}:
+            output.extend(content[index:])
+            break
+        segment_length = int.from_bytes(content[index + 2 : index + 4], "big")
+        end = index + 2 + segment_length
+        if end > len(content):
+            return content
+        if marker not in {0xE1, 0xE2, 0xFE}:
+            output.extend(content[index:end])
+        index = end
+    return bytes(output)
+
+
+def _strip_png_metadata(content: bytes) -> bytes:
+    signature = b"\x89PNG\r\n\x1a\n"
+    if not content.startswith(signature):
+        return content
+    output = bytearray(signature)
+    index = len(signature)
+    while index + 12 <= len(content):
+        length = int.from_bytes(content[index : index + 4], "big")
+        chunk_type = content[index + 4 : index + 8]
+        end = index + 12 + length
+        if end > len(content):
+            return content
+        if chunk_type not in {b"tEXt", b"zTXt", b"iTXt", b"eXIf"}:
+            output.extend(content[index:end])
+        index = end
+        if chunk_type == b"IEND":
+            break
+    return bytes(output)
 
 
 def create_resource_event(db: Session, org_id: str, payload: ResourceEventCreate) -> models.ResourceEvent:

@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 import asyncio
+import hashlib
 from pathlib import Path
 
 import httpx
@@ -37,6 +38,9 @@ class ASGISyncClient:
     def post(self, path: str, **kwargs):
         return self.request("POST", path, **kwargs)
 
+    def put(self, path: str, **kwargs):
+        return self.request("PUT", path, **kwargs)
+
     def patch(self, path: str, **kwargs):
         return self.request("PATCH", path, **kwargs)
 
@@ -45,6 +49,8 @@ class ProductionApiTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         db_path = Path(self.tmp.name) / "prod.db"
+        self.original_evidence_dir = app_module.settings.evidence_storage_dir
+        app_module.settings.evidence_storage_dir = Path(self.tmp.name) / "evidence"
         self.engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
         Base.metadata.create_all(bind=self.engine)
         self.SessionLocal = sessionmaker(bind=self.engine, autoflush=False, autocommit=False, expire_on_commit=False)
@@ -61,6 +67,7 @@ class ProductionApiTests(unittest.TestCase):
 
     def tearDown(self):
         app.dependency_overrides.clear()
+        app_module.settings.evidence_storage_dir = self.original_evidence_dir
         self.tmp.cleanup()
 
     def bootstrap(self):
@@ -161,8 +168,9 @@ class ProductionApiTests(unittest.TestCase):
                     response = self.client.get(path)
                 self.assertEqual(response.status_code, 404, response.text)
 
-    def test_evidence_upload_metadata_uses_object_key_not_raw_bytes(self):
+    def test_evidence_upload_stores_encrypted_content_and_keeps_sync_metadata_only(self):
         token = self.token()
+        content = b"\xff\xd8\xff\xe1\x00\x10Exif\x00\x00private-gps\xff\xdaimage-bytes"
         response = self.client.post(
             "/api/v1/evidence/uploads",
             headers={"authorization": f"Bearer {token}"},
@@ -170,8 +178,8 @@ class ProductionApiTests(unittest.TestCase):
                 "site_id": self.bootstrap_site_id(),
                 "filename": "photo.jpg",
                 "mime_type": "image/jpeg",
-                "size_bytes": 100,
-                "sha256": "a" * 64,
+                "size_bytes": len(content),
+                "sha256": hashlib.sha256(content).hexdigest(),
                 "sync_allowed": True,
             },
         )
@@ -180,6 +188,55 @@ class ProductionApiTests(unittest.TestCase):
         payload = response.json()
         self.assertIn("object_key", payload)
         self.assertNotIn("content_base64", json.dumps(payload))
+        stored = self.client.put(
+            payload["upload_url"],
+            headers={"authorization": f"Bearer {token}", "content-type": "image/jpeg"},
+            content=content,
+        )
+        self.assertEqual(stored.status_code, 200, stored.text)
+        self.assertEqual(stored.json()["storage_status"], "stored")
+
+        encrypted_path = app_module.settings.evidence_storage_dir / f"{payload['object_key']}.enc"
+        self.assertTrue(encrypted_path.exists())
+        encrypted = encrypted_path.read_bytes()
+        self.assertNotEqual(encrypted, content)
+        self.assertNotIn(b"Exif", encrypted)
+
+        evidence = self.client.get("/api/v1/evidence", headers={"authorization": f"Bearer {token}"})
+        self.assertEqual(evidence.status_code, 200, evidence.text)
+        self.assertEqual(evidence.json()[0]["storage_status"], "stored")
+
+        sync_preview = self.client.get("/api/v1/sync/preview", headers={"authorization": f"Bearer {token}"})
+        self.assertEqual(sync_preview.status_code, 200, sync_preview.text)
+        serialized = json.dumps(sync_preview.json())
+        self.assertIn("evidence_record", serialized)
+        self.assertNotIn("content_base64", serialized)
+        self.assertNotIn(str(encrypted_path), serialized)
+
+    def test_evidence_content_rejects_hash_mismatch(self):
+        token = self.token()
+        content = b"real evidence bytes"
+        response = self.client.post(
+            "/api/v1/evidence/uploads",
+            headers={"authorization": f"Bearer {token}"},
+            json={
+                "site_id": self.bootstrap_site_id(),
+                "filename": "note.txt",
+                "mime_type": "text/plain",
+                "size_bytes": len(content),
+                "sha256": hashlib.sha256(b"different").hexdigest(),
+            },
+        )
+        self.assertEqual(response.status_code, 201, response.text)
+
+        stored = self.client.put(
+            response.json()["upload_url"],
+            headers={"authorization": f"Bearer {token}", "content-type": "text/plain"},
+            content=content,
+        )
+
+        self.assertEqual(stored.status_code, 400, stored.text)
+        self.assertIn("hash", stored.text)
 
     def test_production_modules_are_tenant_scoped_and_redacted(self):
         token = self.token()

@@ -145,6 +145,26 @@ async function staffApi(path, options = {}) {
   return api(`/api/v1${path}`, { ...options, auth: true });
 }
 
+async function staffRaw(url, file, headers = {}) {
+  if (!state.accessToken) {
+    throw new Error("Sign in to upload evidence bytes.");
+  }
+  const response = await fetch(url, {
+    method: "PUT",
+    headers: {
+      authorization: `Bearer ${state.accessToken}`,
+      "content-type": file.type || "application/octet-stream",
+      ...headers,
+    },
+    body: file,
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.detail || payload.error || "Upload failed.");
+  }
+  return payload;
+}
+
 function formData(form) {
   return Object.fromEntries(new FormData(form).entries());
 }
@@ -450,7 +470,7 @@ function validateVoiceNote(file) {
 
 async function uploadVoiceNote(reportId, file, syncAllowed) {
   const sha256 = await fileSha256(file);
-  await staffApi("/evidence/uploads", {
+  const record = await staffApi("/evidence/uploads", {
     method: "POST",
     body: {
       site_id: currentSiteId(),
@@ -462,6 +482,7 @@ async function uploadVoiceNote(reportId, file, syncAllowed) {
       sync_allowed: syncAllowed,
     },
   });
+  await staffRaw(record.upload_url, file, record.headers);
 }
 
 const demoPayloads = {
@@ -797,7 +818,8 @@ async function uploadEvidence(event) {
         sync_allowed: form.elements.sync_allowed.checked,
       },
     });
-    $("#evidenceResult").textContent = `Evidence metadata created for ${record.object_key}.`;
+    await staffRaw(record.upload_url, file, record.headers);
+    $("#evidenceResult").textContent = `Evidence stored for ${record.object_key}.`;
     form.reset();
     await loadEvidence();
     if (hasCoordinatorAccess()) await loadSync().catch(() => {});
@@ -832,6 +854,7 @@ async function loadEvidence() {
       </div>
       <div class="dataRowMeta">
         <span class="badge">${item.size_bytes} bytes</span>
+        <span class="badge ${item.storage_status === "stored" ? "ok" : "risk"}">${escapeHtml(item.storage_status || "pending")}</span>
         <span class="badge ${item.sync_allowed ? "ok" : ""}">${item.sync_allowed ? "sync allowed" : "local only"}</span>
       </div>
     </article>

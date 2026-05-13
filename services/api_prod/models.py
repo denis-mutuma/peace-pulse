@@ -126,6 +126,9 @@ class EvidenceRecord(TimestampMixin, Base):
     object_key: Mapped[str] = mapped_column(String(260), nullable=False)
     sync_allowed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     retention_status: Mapped[str] = mapped_column(String(40), default="active", nullable=False)
+    storage_status: Mapped[str] = mapped_column(String(40), default="pending", nullable=False)
+    stored_size_bytes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    stored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ResourceEvent(TimestampMixin, Base):

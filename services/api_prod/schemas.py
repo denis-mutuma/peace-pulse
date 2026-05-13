@@ -136,6 +136,15 @@ class EvidenceUploadResponse(BaseModel):
     headers: dict[str, str]
 
 
+class EvidenceContentResponse(BaseModel):
+    id: str
+    object_key: str
+    storage_status: str
+    sha256: str
+    size_bytes: int
+    stored_size_bytes: int
+
+
 class ResourceEventCreate(BaseModel):
     site_id: str
     resource_id: str = Field(default="water-point-north", max_length=120)
