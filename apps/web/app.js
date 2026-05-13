@@ -8,6 +8,7 @@ const state = {
   resources: [],
   copilotSessionId: localStorage.getItem("peacepulse-copilot-session") || "",
   lastSyncAt: localStorage.getItem("peacepulse-last-sync") || "",
+  lastSyncMode: localStorage.getItem("peacepulse-last-sync-mode") || "",
   demoLog: JSON.parse(localStorage.getItem("peacepulse-demo-log") || "[]"),
 };
 let suppressReportResultClear = false;
@@ -1247,16 +1248,20 @@ async function loadSync() {
   $("#healthDatabase").textContent = health.database || "Unknown";
   $("#syncStatus").textContent = preview.length ? `${preview.length} pending` : "No pending records";
   $("#healthResource").textContent = "Production v1";
-  $("#healthLastSync").textContent = state.lastSyncAt ? new Date(state.lastSyncAt).toLocaleString() : "Not run";
+  $("#healthLastSync").textContent = state.lastSyncAt
+    ? `${new Date(state.lastSyncAt).toLocaleString()} (${state.lastSyncMode || "local only"})`
+    : "Not run";
   renderSyncPreview(preview.length ? preview : history, preview.length ? "Pending sync records" : "Recent sync history");
 }
 
 async function runSync() {
   const result = await staffApi("/sync/run", { method: "POST", body: {} });
-  if (result.synced > 0) {
-    state.lastSyncAt = new Date().toISOString();
-    localStorage.setItem("peacepulse-last-sync", state.lastSyncAt);
-  }
+  state.lastSyncAt = new Date().toISOString();
+  state.lastSyncMode = result.delivery_mode === "remote"
+    ? (result.delivery_state === "failed" ? "remote push failed" : "remote push")
+    : "local only";
+  localStorage.setItem("peacepulse-last-sync", state.lastSyncAt);
+  localStorage.setItem("peacepulse-last-sync-mode", state.lastSyncMode);
   await loadSync();
 }
 

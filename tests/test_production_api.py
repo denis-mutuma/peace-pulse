@@ -494,6 +494,15 @@ class ProductionApiTests(unittest.TestCase):
             validate_production_settings(Settings(env="production", bootstrap_token="boot"))
         with self.assertRaisesRegex(RuntimeError, "BOOTSTRAP_TOKEN"):
             validate_production_settings(Settings(env="production", jwt_secret="not-default"))
+        with self.assertRaisesRegex(RuntimeError, "REMOTE_SYNC_URL"):
+            validate_production_settings(
+                Settings(
+                    env="production",
+                    jwt_secret="not-default",
+                    bootstrap_token="boot",
+                    remote_sync_url="https://coordinator.example",
+                )
+            )
 
     def test_production_bootstrap_requires_bootstrap_token(self):
         original_env = app_module.settings.env
@@ -599,6 +608,8 @@ class ProductionApiTests(unittest.TestCase):
         self.assertEqual(result.status_code, 200, result.text)
         self.assertGreaterEqual(result.json()["synced"], 1)
         self.assertEqual(result.json()["pending"], 0)
+        self.assertEqual(result.json()["delivery_mode"], "local")
+        self.assertEqual(result.json()["delivery_state"], "pushed")
 
         after = self.client.get("/api/v1/sync/preview", headers=headers)
         self.assertEqual(after.status_code, 200, after.text)
@@ -608,6 +619,121 @@ class ProductionApiTests(unittest.TestCase):
         self.assertEqual(history.status_code, 200, history.text)
         self.assertTrue(history.json())
         self.assertTrue(any(item["status"] == "synced" and item["synced_at"] for item in history.json()))
+
+    def test_sync_run_pushes_pending_records_to_remote_coordinator(self):
+        boot = self.bootstrap()
+        login = self.client.post(
+            "/api/v1/auth/login",
+            json={"email": "admin@example.org", "password": "change-this-password"},
+        )
+        headers = {"authorization": f"Bearer {login.json()['access_token']}"}
+        self.client.post(
+            f"/api/v1/public/sites/{boot['site_id']}/reports",
+            json={
+                "rough_location": "North water point",
+                "category_hint": "resource",
+                "text": "Families are turned away after long water queues near Block C-12.",
+            },
+        )
+
+        original_remote_url = app_module.settings.remote_sync_url
+        original_remote_hub_id = app_module.settings.remote_sync_hub_id
+        original_remote_hub_secret = app_module.settings.remote_sync_hub_secret
+        original_remote_timeout = app_module.settings.remote_sync_timeout_seconds
+        app_module.settings.remote_sync_url = "https://coordinator.example"
+        app_module.settings.remote_sync_hub_id = "remote-hub-123"
+        app_module.settings.remote_sync_hub_secret = "remote-sync-secret"
+        app_module.settings.remote_sync_timeout_seconds = 1.5
+        captured = {}
+
+        def handler(request):
+            captured["path"] = request.url.path
+            captured["headers"] = {key.lower(): value for key, value in request.headers.items()}
+            captured["body"] = json.loads(request.content.decode("utf-8"))
+            expected_signature = sign_hub_payload(hash_token(app_module.settings.remote_sync_hub_secret), request.content)
+            self.assertEqual(captured["headers"]["x-hub-id"], app_module.settings.remote_sync_hub_id)
+            self.assertEqual(captured["headers"]["x-hub-signature"], expected_signature)
+            self.assertNotIn("raw_text", json.dumps(captured["body"]))
+            self.assertNotIn("encrypted_path", json.dumps(captured["body"]))
+            self.assertNotIn("content_base64", json.dumps(captured["body"]))
+            return httpx.Response(
+                200,
+                json={
+                    "batch_id": "sbn_remote_1",
+                    "accepted": len(captured["body"]["items"]),
+                    "rejected": 0,
+                    "results": [{"item_id": item["item_id"], "status": "accepted"} for item in captured["body"]["items"]],
+                },
+            )
+
+        original_remote_client = app_module.services._remote_sync_client
+        app_module.services._remote_sync_client = lambda timeout: httpx.Client(transport=httpx.MockTransport(handler), timeout=timeout)
+        try:
+            result = self.client.post("/api/v1/sync/run", headers=headers, json={})
+            self.assertEqual(result.status_code, 200, result.text)
+            payload = result.json()
+            self.assertEqual(payload["delivery_mode"], "remote")
+            self.assertEqual(payload["delivery_state"], "pushed")
+            self.assertEqual(payload["synced"], 1)
+            self.assertEqual(payload["pending"], 0)
+            self.assertEqual(captured["path"], f"/api/v1/hubs/{app_module.settings.remote_sync_hub_id}/sync/batches")
+
+            after = self.client.get("/api/v1/sync/preview", headers=headers)
+            self.assertEqual(after.status_code, 200, after.text)
+            self.assertEqual(after.json(), [])
+            history = self.client.get("/api/v1/sync/history", headers=headers)
+            self.assertEqual(history.status_code, 200, history.text)
+            self.assertTrue(any(item["status"] == "synced" for item in history.json()))
+        finally:
+            app_module.services._remote_sync_client = original_remote_client
+            app_module.settings.remote_sync_url = original_remote_url
+            app_module.settings.remote_sync_hub_id = original_remote_hub_id
+            app_module.settings.remote_sync_hub_secret = original_remote_hub_secret
+            app_module.settings.remote_sync_timeout_seconds = original_remote_timeout
+
+    def test_sync_run_keeps_records_pending_when_remote_push_fails(self):
+        boot = self.bootstrap()
+        login = self.client.post(
+            "/api/v1/auth/login",
+            json={"email": "admin@example.org", "password": "change-this-password"},
+        )
+        headers = {"authorization": f"Bearer {login.json()['access_token']}"}
+        self.client.post(
+            f"/api/v1/public/sites/{boot['site_id']}/reports",
+            json={"rough_location": "North water point", "category_hint": "resource", "text": "Families are turned away after long water queues."},
+        )
+
+        original_remote_url = app_module.settings.remote_sync_url
+        original_remote_hub_id = app_module.settings.remote_sync_hub_id
+        original_remote_hub_secret = app_module.settings.remote_sync_hub_secret
+        app_module.settings.remote_sync_url = "https://coordinator.example"
+        app_module.settings.remote_sync_hub_id = "remote-hub-123"
+        app_module.settings.remote_sync_hub_secret = "remote-sync-secret"
+
+        def handler(_request):
+            return httpx.Response(503, json={"detail": "coordinator down"})
+
+        original_remote_client = app_module.services._remote_sync_client
+        app_module.services._remote_sync_client = lambda timeout: httpx.Client(transport=httpx.MockTransport(handler), timeout=timeout)
+        try:
+            result = self.client.post("/api/v1/sync/run", headers=headers, json={})
+            self.assertEqual(result.status_code, 200, result.text)
+            payload = result.json()
+            self.assertEqual(payload["delivery_mode"], "remote")
+            self.assertEqual(payload["delivery_state"], "failed")
+            self.assertEqual(payload["synced"], 0)
+            self.assertEqual(payload["pending"], 1)
+            self.assertIn("coordinator down", payload["delivery_detail"])
+
+            preview = self.client.get("/api/v1/sync/preview", headers=headers)
+            self.assertEqual(preview.status_code, 200, preview.text)
+            self.assertEqual(len(preview.json()), 1)
+            self.assertEqual(preview.json()[0]["status"], "pending")
+        finally:
+            app_module.services._remote_sync_client = original_remote_client
+            app_module.settings.remote_sync_url = original_remote_url
+            app_module.settings.remote_sync_hub_id = original_remote_hub_id
+            app_module.settings.remote_sync_hub_secret = original_remote_hub_secret
 
 
 if __name__ == "__main__":

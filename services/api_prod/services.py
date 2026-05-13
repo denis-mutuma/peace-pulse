@@ -5,6 +5,7 @@ import json
 import re
 from typing import Any
 
+import httpx
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -33,7 +34,7 @@ from .schemas import (
     RumorCreate,
     SyncBatchIn,
 )
-from .security import hash_password, hash_token, make_token_urlsafe, new_id, now_utc
+from .security import hash_password, hash_token, make_token_urlsafe, new_id, now_utc, sign_hub_payload
 
 def require(condition: bool, message: str, code: int = status.HTTP_400_BAD_REQUEST) -> None:
     if not condition:
@@ -607,15 +608,36 @@ def sync_status(db: Session, org_id: str, site_ids: set[str] | None = None) -> d
 
 
 def run_sync(db: Session, org_id: str, site_ids: set[str] | None = None) -> dict[str, Any]:
-    pending = sync_preview(db, org_id, site_ids)
+    _ensure_sync_records(db, org_id, site_ids)
+    records = _sync_records_for_run(db, org_id, site_ids)
+    remote = _remote_sync_destination()
     now = now_utc()
+    if not records:
+        mode = "remote" if remote else "local"
+        detail = "No pending sync records were available."
+        audit(db, org_id, None, None, "sync.run", "sync_record", org_id, detail)
+        db.commit()
+        return {"synced": 0, **sync_status(db, org_id, site_ids), "delivery_mode": mode, "delivery_state": "idle", "delivery_detail": detail}
+
+    if remote:
+        result = _push_remote_sync(db, org_id, records, remote)
+        audit(db, org_id, None, None, "sync.remote_push", "sync_record", org_id, result["delivery_detail"])
+        db.commit()
+        return {
+            "synced": result["synced"],
+            **sync_status(db, org_id, site_ids),
+            "delivery_mode": "remote",
+            "delivery_state": result["delivery_state"],
+            "delivery_detail": result["delivery_detail"],
+            "remote_batch_id": result.get("batch_id", ""),
+            "remote_endpoint": result.get("endpoint", ""),
+        }
+
     synced = 0
-    for item in pending:
-        record = db.get(models.SyncRecord, item["id"])
-        if not record:
-            continue
-        serialized = json.dumps(item["summary"]).lower()
-        if _sync_payload_has_local_only_fields(item["summary"]) or _sync_payload_looks_unredacted(serialized):
+    for record in records:
+        payload = json.loads(record.payload_json)
+        serialized = json.dumps(payload).lower()
+        if _sync_payload_has_local_only_fields(payload) or _sync_payload_looks_unredacted(serialized):
             record.status = "failed"
             record.failure_reason = "payload failed privacy guard"
             continue
@@ -623,9 +645,143 @@ def run_sync(db: Session, org_id: str, site_ids: set[str] | None = None) -> dict
         record.synced_at = now
         record.failure_reason = ""
         synced += 1
-    audit(db, org_id, None, None, "sync.run", "sync_record", org_id, f"{synced} pending records marked synced.")
+    audit(db, org_id, None, None, "sync.local_run", "sync_record", org_id, f"{synced} records marked synced locally.")
     db.commit()
-    return {"synced": synced, **sync_status(db, org_id, site_ids)}
+    return {
+        "synced": synced,
+        **sync_status(db, org_id, site_ids),
+        "delivery_mode": "local",
+        "delivery_state": "pushed",
+        "delivery_detail": "Synced locally because no remote coordinator is configured.",
+    }
+
+
+def _remote_sync_destination() -> dict[str, Any] | None:
+    settings = get_settings()
+    fields = (settings.remote_sync_url.strip(), settings.remote_sync_hub_id.strip(), settings.remote_sync_hub_secret.strip())
+    if any(fields) and not all(fields):
+        raise RuntimeError(
+            "PEACEPULSE_REMOTE_SYNC_URL, PEACEPULSE_REMOTE_SYNC_HUB_ID, and PEACEPULSE_REMOTE_SYNC_HUB_SECRET must be configured together."
+        )
+    if not all(fields):
+        return None
+    return {
+        "base_url": fields[0].rstrip("/"),
+        "hub_id": fields[1],
+        "hub_secret": fields[2],
+        "timeout": float(settings.remote_sync_timeout_seconds or 10.0),
+    }
+
+
+def _sync_records_for_run(db: Session, org_id: str, site_ids: set[str] | None = None) -> list[models.SyncRecord]:
+    query = select(models.SyncRecord).where(models.SyncRecord.organization_id == org_id, models.SyncRecord.status.in_(("pending", "failed")))
+    if site_ids:
+        query = query.where((models.SyncRecord.site_id.is_(None)) | (models.SyncRecord.site_id.in_(site_ids)))
+    return list(db.scalars(query.order_by(models.SyncRecord.created_at.desc(), models.SyncRecord.id.desc())))
+
+
+def _sync_batch_payload(org_id: str, remote_hub_id: str, records: list[models.SyncRecord]) -> SyncBatchIn:
+    items = [
+        {"item_type": record.item_type, "item_id": record.item_id, "payload": json.loads(record.payload_json)}
+        for record in records
+    ]
+    key_source = json.dumps({"org_id": org_id, "remote_hub_id": remote_hub_id, "items": items}, sort_keys=True, separators=(",", ":"), default=str)
+    return SyncBatchIn(idempotency_key=hashlib.sha256(key_source.encode("utf-8")).hexdigest(), items=items)
+
+
+def _remote_sync_client(timeout: float) -> httpx.Client:
+    return httpx.Client(timeout=timeout, follow_redirects=False)
+
+
+def _push_remote_sync(db: Session, org_id: str, records: list[models.SyncRecord], remote: dict[str, Any]) -> dict[str, Any]:
+    batch = _sync_batch_payload(org_id, remote["hub_id"], records)
+    body = json.dumps(batch.model_dump(mode="python"), separators=(",", ":"), sort_keys=True, default=str).encode("utf-8")
+    endpoint = f"{remote['base_url']}/api/v1/hubs/{remote['hub_id']}/sync/batches"
+    headers = {
+        "content-type": "application/json",
+        "x-hub-id": remote["hub_id"],
+        "x-hub-signature": sign_hub_payload(hash_token(remote["hub_secret"]), body),
+    }
+
+    try:
+        with _remote_sync_client(remote["timeout"]) as client:
+            response = client.post(endpoint, content=body, headers=headers)
+    except httpx.HTTPError as exc:
+        return {
+            "synced": 0,
+            "delivery_state": "failed",
+            "delivery_detail": f"Remote push failed: {exc}",
+            "endpoint": endpoint,
+        }
+
+    if response.status_code >= 400:
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = {}
+        detail = payload.get("detail") or payload.get("error") or response.text or "Remote sync rejected the batch."
+        return {
+            "synced": 0,
+            "delivery_state": "failed",
+            "delivery_detail": f"Remote push failed: {detail}",
+            "endpoint": endpoint,
+        }
+
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        return {
+            "synced": 0,
+            "delivery_state": "failed",
+            "delivery_detail": f"Remote push failed: invalid JSON response from {endpoint}.",
+            "endpoint": endpoint,
+        }
+
+    results = payload.get("results")
+    if not isinstance(results, list) or len(results) != len(records):
+        return {
+            "synced": 0,
+            "delivery_state": "failed",
+            "delivery_detail": f"Remote push failed: incomplete batch response from {endpoint}.",
+            "endpoint": endpoint,
+        }
+
+    record_lookup = {(record.item_type, record.item_id): record for record in records}
+    accepted = 0
+    rejected = 0
+    now = now_utc()
+    for record, result in zip(records, results):
+        local_record = record_lookup.get((record.item_type, record.item_id))
+        if not local_record:
+            continue
+        status_value = result.get("status")
+        if status_value == "accepted":
+            local_record.status = "synced"
+            local_record.synced_at = now
+            local_record.failure_reason = ""
+            accepted += 1
+            continue
+        if status_value == "rejected":
+            local_record.status = "failed"
+            local_record.failure_reason = result.get("reason", "Remote sync rejected the payload.")
+            rejected += 1
+            continue
+        return {
+            "synced": 0,
+            "delivery_state": "failed",
+            "delivery_detail": f"Remote push failed: unexpected item status in response from {endpoint}.",
+            "endpoint": endpoint,
+        }
+
+    return {
+        "synced": accepted,
+        "accepted": accepted,
+        "rejected": rejected,
+        "delivery_state": "pushed",
+        "delivery_detail": f"Remote push to {endpoint} completed with {accepted} accepted and {rejected} rejected.",
+        "batch_id": payload.get("batch_id", ""),
+        "endpoint": endpoint,
+    }
 
 
 def _ensure_sync_records(db: Session, org_id: str, site_ids: set[str] | None = None) -> None:

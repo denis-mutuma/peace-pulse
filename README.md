@@ -30,6 +30,7 @@ The production API supports these optional environment variables:
 - `PEACEPULSE_BOOTSTRAP_TOKEN`: required in production for first-tenant bootstrap.
 - `PEACEPULSE_EVIDENCE_STORAGE_DIR`: local fallback evidence object directory.
 - `PEACEPULSE_S3_ENDPOINT_URL` and `PEACEPULSE_S3_BUCKET`: optional S3-compatible evidence object storage.
+- `PEACEPULSE_REMOTE_SYNC_URL`, `PEACEPULSE_REMOTE_SYNC_HUB_ID`, and `PEACEPULSE_REMOTE_SYNC_HUB_SECRET`: optional remote coordinator endpoint and signing secret for pushed sync batches.
 
 Bootstrap the first production tenant after starting the API:
 
@@ -43,6 +44,8 @@ curl -X POST http://localhost:8080/api/v1/admin/bootstrap \
 The browser also exposes this bootstrap flow in the Production Access panel. After bootstrapping, sign in with the admin account, enroll MFA from the access panel, and verify a code from an authenticator app. Staff views use `/api/v1` with server-enforced roles.
 
 Evidence uploads are capped at 2 MB and limited to image, audio, text, or PDF content. The hub validates the file hash, strips basic image metadata where feasible, stores encrypted bytes on the local edge, and syncs metadata and hashes only. Raw bytes and local storage paths are not included in the sync preview.
+
+When `PEACEPULSE_REMOTE_SYNC_URL`, `PEACEPULSE_REMOTE_SYNC_HUB_ID`, and `PEACEPULSE_REMOTE_SYNC_HUB_SECRET` are configured together, the coordinator `Run sync` action pushes signed sync batches to the remote endpoint. If they are unset, the hub stays local-only and keeps the same privacy-safe preview/history behavior.
 
 ## Tests
 

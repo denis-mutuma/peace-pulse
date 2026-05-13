@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     refresh_token_days: int = 14
     s3_endpoint_url: str = ""
     s3_bucket: str = "peacepulse-evidence"
+    remote_sync_url: str = ""
+    remote_sync_hub_id: str = ""
+    remote_sync_hub_secret: str = ""
+    remote_sync_timeout_seconds: float = 10.0
     evidence_storage_dir: Path = ROOT / "data" / "storage" / "evidence-prod"
     allow_demo_seed: bool = os.environ.get("PEACEPULSE_ENV", "development") != "production"
 
@@ -46,3 +50,8 @@ def validate_production_settings(settings: Settings | None = None) -> None:
         raise RuntimeError("PEACEPULSE_JWT_SECRET must be set to a non-default value in production.")
     if not settings.bootstrap_token:
         raise RuntimeError("PEACEPULSE_BOOTSTRAP_TOKEN must be set in production.")
+    remote_sync_fields = (settings.remote_sync_url, settings.remote_sync_hub_id, settings.remote_sync_hub_secret)
+    if any(remote_sync_fields) and not all(remote_sync_fields):
+        raise RuntimeError(
+            "PEACEPULSE_REMOTE_SYNC_URL, PEACEPULSE_REMOTE_SYNC_HUB_ID, and PEACEPULSE_REMOTE_SYNC_HUB_SECRET must be set together."
+        )
