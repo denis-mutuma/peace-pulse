@@ -1,12 +1,12 @@
 const state = {
   offline: localStorage.getItem("peacepulse-offline") === "true",
-  role: localStorage.getItem("peacepulse-role") || "community",
-  productionAvailable: false,
-  accessToken: "",
-  staff: null,
+  accessToken: localStorage.getItem("peacepulse-access-token") || "",
+  staff: JSON.parse(localStorage.getItem("peacepulse-staff") || "null"),
   publicSites: JSON.parse(localStorage.getItem("peacepulse-public-sites") || "[]"),
   selectedSiteId: localStorage.getItem("peacepulse-site-id") || "",
   incidents: [],
+  resources: [],
+  copilotSessionId: localStorage.getItem("peacepulse-copilot-session") || "",
   lastSyncAt: localStorage.getItem("peacepulse-last-sync") || "",
   demoLog: JSON.parse(localStorage.getItem("peacepulse-demo-log") || "[]"),
 };
@@ -80,6 +80,20 @@ const PHRASEBOOK = {
     warning: "تجنبوا الأسماء أو المنازل الدقيقة أو أرقام الهاتف أو أي تفاصيل تكشف الهوية.",
   },
 };
+const VIEW_TITLES = {
+  access: "Production Access",
+  dashboard: "Incidents",
+  demo: "Guided Scenario",
+  evidence: "Evidence Locker",
+  privacy: "Privacy Audit",
+  report: "Anonymous Report",
+  resources: "Resource Monitor",
+  routes: "Routes And Services",
+  rumors: "RumorShield",
+  sync: "Hub Sync",
+  work: "FairWork Board",
+  copilot: "Copilot",
+};
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
@@ -123,9 +137,6 @@ async function v1(path, options = {}) {
 }
 
 async function staffApi(path, options = {}) {
-  if (!state.productionAvailable) {
-    return api(path.replace("/v1", ""), options);
-  }
   if (!state.accessToken) {
     const error = new Error("Sign in to use staff tools.");
     error.authRequired = true;
@@ -169,15 +180,26 @@ function hasRole(...roles) {
   return Boolean(state.staff?.roles?.some((role) => roles.includes(role)));
 }
 
+function hasCoordinatorAccess() {
+  return hasRole("coordinator", "org_admin", "system_admin");
+}
+
 function saveSession(token, staff = null) {
   state.accessToken = token || "";
   state.staff = staff;
-  localStorage.removeItem("peacepulse-access-token");
-  localStorage.removeItem("peacepulse-staff");
+  if (state.accessToken) {
+    localStorage.setItem("peacepulse-access-token", state.accessToken);
+  } else {
+    localStorage.removeItem("peacepulse-access-token");
+  }
+  if (staff) {
+    localStorage.setItem("peacepulse-staff", JSON.stringify(staff));
+  } else {
+    localStorage.removeItem("peacepulse-staff");
+  }
   if (staff) {
     const siteId = staff.site_ids?.[0] || state.selectedSiteId;
     if (siteId) saveSelectedSite(siteId);
-  } else {
   }
   renderAccessState();
   applyRole();
@@ -204,7 +226,7 @@ function renderPublicSites() {
   const select = $("#publicSiteSelect");
   if (!select) return;
   if (!state.publicSites.length) {
-    select.innerHTML = `<option value="">Legacy local demo</option>`;
+    select.innerHTML = `<option value="">No active sites</option>`;
     return;
   }
   select.innerHTML = state.publicSites.map((site) => `
@@ -213,35 +235,26 @@ function renderPublicSites() {
 }
 
 function renderAccessState() {
-  $("#accessPanel").hidden = !state.productionAvailable;
-  $("#roleSelect").hidden = state.productionAvailable;
+  $("#accessPanel").hidden = false;
   $("#logoutStaff").hidden = !hasStaffAccess();
   $("#mfaForm").hidden = !hasStaffAccess();
   const summary = $("#sessionSummary");
-  if (!state.productionAvailable) {
-    summary.textContent = "Legacy local demo API is active.";
-    return;
-  }
   if (hasStaffAccess()) {
     summary.textContent = `Signed in as ${state.staff.email} (${state.staff.roles.join(", ")}). MFA ${state.staff.mfa_enabled ? "enabled" : "not enrolled"}.`;
   } else {
-    summary.textContent = "Production API is active. Anonymous reporting is open; staff tools require sign in.";
+    summary.textContent = "Anonymous reporting is open when the production API is reachable; staff tools require sign in.";
   }
 }
 
 async function loadProductionContext() {
   try {
     await v1("/health");
-    state.productionAvailable = true;
     const sites = await v1("/public/sites");
     savePublicSites(sites);
-    renderAccessState();
-    applyRole();
   } catch {
-    state.productionAvailable = false;
-    renderAccessState();
-    applyRole();
   }
+  renderAccessState();
+  applyRole();
 }
 
 async function bootstrapTenant(event) {
@@ -328,6 +341,7 @@ function updateQueueCount() {
   $("#queueList").innerHTML = items.slice(0, 5).map((item) => `
     <p><strong>${escapeHtml(item.payload.category_hint || "report")}</strong> queued ${new Date(item.queued_at).toLocaleString()}</p>
   `).join("");
+  renderDashboardMetrics();
 }
 
 function newLocalId() {
@@ -390,21 +404,21 @@ async function submitReport(event) {
   try {
     if (voiceFile) validateVoiceNote(voiceFile);
     const siteId = currentSiteId();
-    if (state.productionAvailable && !siteId) {
+    if (!siteId) {
       throw new Error("Bootstrap or select a production site before submitting a report.");
     }
-    const result = state.productionAvailable
-      ? await v1(`/public/sites/${siteId}/reports`, { method: "POST", body: payload })
-      : await api("/api/reports", { method: "POST", body: payload });
+    const result = await v1(`/public/sites/${siteId}/reports`, { method: "POST", body: payload });
     let voiceMessage = "";
-    if (voiceFile && state.productionAvailable) {
-      voiceMessage = " Voice-note bytes require the legacy local evidence locker until anonymous production evidence intake is enabled.";
-    } else if (voiceFile) {
-      try {
-        await uploadVoiceNote(result.report.id, voiceFile, form.elements.voice_sync_allowed.checked);
-        voiceMessage = " Voice note stored as linked local evidence.";
-      } catch (voiceError) {
-        voiceMessage = ` Voice note was not stored: ${voiceError.message}`;
+    if (voiceFile) {
+      if (hasStaffAccess()) {
+        try {
+          await uploadVoiceNote(result.id, voiceFile, form.elements.voice_sync_allowed.checked);
+          voiceMessage = " Voice-note metadata stored as linked production evidence.";
+        } catch (voiceError) {
+          voiceMessage = ` Voice-note metadata was not stored: ${voiceError.message}`;
+        }
+      } else {
+        voiceMessage = " Voice-note metadata requires staff sign-in; the text report was submitted.";
       }
     }
     const incident = result.incident || result;
@@ -435,13 +449,15 @@ function validateVoiceNote(file) {
 }
 
 async function uploadVoiceNote(reportId, file, syncAllowed) {
-  const content_base64 = await readAsDataUrl(file);
-  await api("/api/evidence", {
+  const sha256 = await fileSha256(file);
+  await staffApi("/evidence/uploads", {
     method: "POST",
     body: {
+      site_id: currentSiteId(),
       filename: file.name || "voice-note.webm",
       mime_type: file.type,
-      content_base64,
+      size_bytes: file.size,
+      sha256,
       linked_report_id: reportId,
       sync_allowed: syncAllowed,
     },
@@ -458,7 +474,6 @@ const demoPayloads = {
   evidence: {
     filename: "water-point-note.txt",
     mime_type: "text/plain",
-    content_base64: btoa("Steward note: queue pressure and allegations of favoritism need mediation review."),
     sync_allowed: true,
   },
   resource: {
@@ -478,19 +493,34 @@ const demoPayloads = {
 
 const demoActions = {
   async report() {
-    const result = await api("/api/reports", { method: "POST", body: demoPayloads.report });
-    return `Report triaged as ${result.incident.category} with severity ${result.incident.severity}.`;
+    const siteId = currentSiteId();
+    const result = await v1(`/public/sites/${siteId}/reports`, { method: "POST", body: demoPayloads.report });
+    return `Report triaged as ${result.category} with severity ${result.severity}.`;
   },
   async evidence() {
-    const result = await api("/api/evidence", { method: "POST", body: demoPayloads.evidence });
-    return `Evidence hashed ${result.sha256.slice(0, 16)}... and stored locally.`;
+    const siteId = currentSiteId();
+    const text = "Steward note: queue pressure and allegations of favoritism need mediation review.";
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+    const sha256 = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+    const result = await staffApi("/evidence/uploads", {
+      method: "POST",
+      body: {
+        site_id: siteId,
+        filename: demoPayloads.evidence.filename,
+        mime_type: demoPayloads.evidence.mime_type,
+        size_bytes: text.length,
+        sha256,
+        sync_allowed: true,
+      },
+    });
+    return `Evidence metadata created for ${result.object_key}.`;
   },
   async resource() {
-    const result = await api("/api/sensor-events", { method: "POST", body: demoPayloads.resource });
+    const result = await staffApi("/resources/events", { method: "POST", body: { ...demoPayloads.resource, site_id: currentSiteId() } });
     return `Resource anomaly recorded: ${result.anomaly}.`;
   },
   async rumor() {
-    const result = await api("/api/rumors", { method: "POST", body: demoPayloads.rumor });
+    const result = await staffApi("/rumors", { method: "POST", body: { ...demoPayloads.rumor, site_id: currentSiteId() } });
     return `Rumor cluster queued with severity ${result.severity}.`;
   },
 };
@@ -531,15 +561,14 @@ function resetDemoLog() {
   renderDemoLog();
 }
 
-async function resetDemoData() {
+async function clearDemoState() {
   try {
-    const result = await api("/api/demo/reset", { method: "POST", body: {} });
     localStorage.removeItem("peacepulse-report-queue");
     state.demoLog = [];
     localStorage.removeItem("peacepulse-demo-log");
     updateQueueCount();
     renderDemoLog();
-    setDemoResult(`Demo reset with ${result.seeded.reports} reports and ${result.seeded.incidents} incidents.`);
+    setDemoResult("Local demo log and browser queue cleared. Production records remain unchanged.");
     await refreshAll();
   } catch (error) {
     setDemoResult(error.message);
@@ -560,14 +589,10 @@ async function flushQueue() {
   for (const item of items) {
     try {
       const siteId = currentSiteId();
-      if (state.productionAvailable && !siteId) {
+      if (!siteId) {
         throw new Error("No production site selected.");
       }
-      if (state.productionAvailable) {
-        await v1(`/public/sites/${siteId}/reports`, { method: "POST", body: item.payload });
-      } else {
-        await api("/api/reports", { method: "POST", body: item.payload });
-      }
+      await v1(`/public/sites/${siteId}/reports`, { method: "POST", body: item.payload });
       accepted += 1;
     } catch (error) {
       if (error.queueable) {
@@ -589,6 +614,7 @@ async function flushQueue() {
 }
 
 function renderIncidents(items) {
+  renderDashboardMetrics();
   const status = $("#statusFilter").value;
   const category = $("#categoryFilter").value;
   const minSeverity = Number($("#severityFilter").value || 1);
@@ -596,40 +622,52 @@ function renderIncidents(items) {
     (!status || item.status === status) &&
     (!category || item.category === category) &&
     item.severity >= minSeverity
-  );
+  ).sort((a, b) => b.severity - a.severity || new Date(b.created_at) - new Date(a.created_at));
   if (!filtered.length) {
     $("#incidentGrid").innerHTML = `<p class="empty">No incidents match the current filters.</p>`;
     return;
   }
   $("#incidentGrid").innerHTML = filtered.map((item) => `
-    <article class="card">
-      <h3>${item.category.replaceAll("_", " ")}</h3>
-      <span class="badge risk">Severity ${item.severity}</span>
-      <span class="badge">${item.status}</span>
-      <span class="badge">${Math.round(item.confidence * 100)}% confidence</span>
-      <p>${escapeHtml(item.redacted_text)}</p>
-      <p><strong>Cluster:</strong> ${escapeHtml(item.cluster_key)}</p>
-      <p><strong>Public update:</strong> ${escapeHtml(item.public_update)}</p>
-      <select data-status="${item.id}">
-        ${["new", "assigned", "in_progress", "resolved"].map((status) => `<option ${status === item.status ? "selected" : ""}>${status}</option>`).join("")}
-      </select>
-      <form class="noteForm" data-note="${item.id}">
-        <input name="note" placeholder="Add mediation note" maxlength="500" required />
-        <button type="submit">Add note</button>
-      </form>
-      <div class="noteList" data-notes="${item.id}"></div>
-      <button class="secondary" type="button" data-timeline="${item.id}">Show timeline</button>
-      <div class="timeline" data-timeline-list="${item.id}"></div>
+    <article class="incidentCard">
+      <div class="incidentMain">
+        <div class="incidentTopline">
+          <div class="incidentTitle">
+            <h3>${escapeHtml(item.category.replaceAll("_", " "))}</h3>
+            <div class="badgeRow">
+              <span class="badge risk">Severity ${item.severity}</span>
+              <span class="badge">${escapeHtml(item.status.replaceAll("_", " "))}</span>
+              <span class="badge">${Math.round(item.confidence * 100)}% confidence</span>
+            </div>
+          </div>
+          <span class="badge">${new Date(item.created_at).toLocaleDateString()}</span>
+        </div>
+        <p class="incidentText">${escapeHtml(item.redacted_text)}</p>
+        <div class="incidentMeta">
+          <span class="badge">Cluster ${escapeHtml(item.cluster_key)}</span>
+          <span class="badge">Site ${escapeHtml(item.site_id)}</span>
+        </div>
+        <p class="incidentText"><strong>Public update:</strong> ${escapeHtml(item.public_update)}</p>
+        <div class="noteList" data-notes="${item.id}"></div>
+        <div class="timeline" data-timeline-list="${item.id}"></div>
+      </div>
+      <div class="incidentActions">
+        <label>Status
+          <select data-status="${item.id}">
+            ${["new", "assigned", "in_progress", "resolved"].map((status) => `<option value="${status}" ${status === item.status ? "selected" : ""}>${status.replaceAll("_", " ")}</option>`).join("")}
+          </select>
+        </label>
+        <form class="noteForm" data-note="${item.id}">
+          <input name="note" placeholder="Add mediation note" maxlength="500" required />
+          <button type="submit">Add</button>
+        </form>
+        <button class="secondary" type="button" data-timeline="${item.id}">Show timeline</button>
+      </div>
     </article>
   `).join("");
   $$("[data-status]").forEach((select) => {
     select.addEventListener("change", async () => {
       try {
-        if (state.productionAvailable) {
-          await staffApi(`/incidents/${select.dataset.status}/status`, { method: "PATCH", body: { status: select.value } });
-        } else {
-          await api(`/api/incidents/${select.dataset.status}/status`, { method: "PATCH", body: { status: select.value } });
-        }
+        await staffApi(`/incidents/${select.dataset.status}/status`, { method: "PATCH", body: { status: select.value } });
         setDashboardResult("Incident status updated.");
         await loadIncidents();
       } catch (error) {
@@ -641,13 +679,34 @@ function renderIncidents(items) {
   bindTimelineButtons();
 }
 
+function renderDashboardMetrics() {
+  const target = $("#dashboardMetrics");
+  if (!target) return;
+  const openIncidents = state.incidents.filter((item) => item.status !== "resolved").length;
+  const highSeverity = state.incidents.filter((item) => item.status !== "resolved" && item.severity >= 4).length;
+  const resourceAnomalies = state.resources.filter((item) => item.anomaly && item.anomaly !== "normal").length;
+  const queuedReports = queue().length;
+  target.innerHTML = [
+    ["Open incidents", openIncidents],
+    ["High severity", highSeverity],
+    ["Resource anomalies", resourceAnomalies],
+    ["Queued reports", queuedReports],
+  ].map(([label, value]) => `
+    <div class="metricTile">
+      <span>${label}</span>
+      <strong>${value}</strong>
+    </div>
+  `).join("");
+}
+
 async function loadIncidents() {
-  if (state.productionAvailable && !hasStaffAccess()) {
+  if (!hasStaffAccess()) {
     state.incidents = [];
+    renderDashboardMetrics();
     $("#incidentGrid").innerHTML = `<p class="empty">Sign in to view production incidents.</p>`;
     return;
   }
-  state.incidents = state.productionAvailable ? await staffApi("/incidents") : await api("/api/incidents");
+  state.incidents = await staffApi("/incidents");
   renderIncidents(state.incidents);
 }
 
@@ -656,7 +715,7 @@ async function loadVisibleNotes(items) {
     const target = $(`[data-notes="${item.id}"]`);
     if (!target) return;
     try {
-      const notes = state.productionAvailable ? await staffApi(`/incidents/${item.id}/notes`) : await api(`/api/incidents/${item.id}/notes`);
+      const notes = await staffApi(`/incidents/${item.id}/notes`);
       target.innerHTML = notes.slice(0, 3).map((note) => `
         <p><strong>${escapeHtml(note.actor_label || "responder")}</strong>: ${escapeHtml(note.note)}</p>
       `).join("") || `<p class="empty">No mediation notes yet.</p>`;
@@ -675,14 +734,7 @@ function bindNoteForms() {
       event.preventDefault();
       const note = form.elements.note.value.trim();
       try {
-        if (state.productionAvailable) {
-          await staffApi(`/incidents/${form.dataset.note}/notes`, { method: "POST", body: { note } });
-        } else {
-          await api(`/api/incidents/${form.dataset.note}/notes`, {
-            method: "POST",
-            body: { actor_label: state.role, note },
-          });
-        }
+        await staffApi(`/incidents/${form.dataset.note}/notes`, { method: "POST", body: { note } });
         form.reset();
         setDashboardResult("Mediation note added.");
         await loadIncidents();
@@ -707,9 +759,7 @@ function bindTimelineButtons() {
         return;
       }
       try {
-        const items = state.productionAvailable
-          ? await staffApi(`/incidents/${button.dataset.timeline}/timeline`)
-          : await api(`/api/incidents/${button.dataset.timeline}/timeline`);
+        const items = await staffApi(`/incidents/${button.dataset.timeline}/timeline`);
         target.dataset.expanded = "true";
         target.innerHTML = items.map((item) => `
           <div>
@@ -733,38 +783,24 @@ async function uploadEvidence(event) {
   if (!file) return;
   try {
     validateEvidenceFile(file);
-    if (state.productionAvailable) {
-      const siteId = currentSiteId();
-      if (!siteId) throw new Error("Select a production site before adding evidence metadata.");
-      const sha256 = await fileSha256(file);
-      const record = await staffApi("/evidence/uploads", {
-        method: "POST",
-        body: {
-          site_id: siteId,
-          filename: file.name,
-          mime_type: file.type,
-          size_bytes: file.size,
-          sha256,
-          sync_allowed: form.elements.sync_allowed.checked,
-        },
-      });
-      $("#evidenceResult").textContent = `Evidence metadata created for ${record.object_key}.`;
-    } else {
-      const content_base64 = await readAsDataUrl(file);
-      await api("/api/evidence", {
-        method: "POST",
-        body: {
-          filename: file.name,
-          mime_type: file.type,
-          content_base64,
-          sync_allowed: form.elements.sync_allowed.checked,
-        },
-      });
-      $("#evidenceResult").textContent = "Evidence uploaded, hashed, and stored locally.";
-    }
+    const siteId = currentSiteId();
+    if (!siteId) throw new Error("Select a production site before adding evidence metadata.");
+    const sha256 = await fileSha256(file);
+    const record = await staffApi("/evidence/uploads", {
+      method: "POST",
+      body: {
+        site_id: siteId,
+        filename: file.name,
+        mime_type: file.type,
+        size_bytes: file.size,
+        sha256,
+        sync_allowed: form.elements.sync_allowed.checked,
+      },
+    });
+    $("#evidenceResult").textContent = `Evidence metadata created for ${record.object_key}.`;
     form.reset();
     await loadEvidence();
-    if (state.role === "coordinator" || hasRole("coordinator", "org_admin")) await loadSync().catch(() => {});
+    if (hasCoordinatorAccess()) await loadSync().catch(() => {});
   } catch (error) {
     $("#evidenceResult").textContent = error.message;
   }
@@ -780,19 +816,24 @@ function validateEvidenceFile(file) {
 }
 
 async function loadEvidence() {
-  if (state.productionAvailable && !hasStaffAccess()) {
+  if (!hasStaffAccess()) {
     $("#evidenceList").innerHTML = `<p class="empty">Sign in to view production evidence metadata.</p>`;
     return;
   }
-  const items = state.productionAvailable ? await staffApi("/evidence") : await api("/api/evidence");
+  const items = await staffApi("/evidence");
+  $("#evidenceList").className = "dataList";
   $("#evidenceList").innerHTML = items.map((item) => `
-    <article class="card">
-      <h3>${escapeHtml(item.filename)}</h3>
-      <span class="badge">${item.size_bytes} bytes</span>
-      <span class="badge">${item.sync_allowed ? "sync allowed" : "local only"}</span>
-      <p><strong>SHA-256:</strong> ${escapeHtml(item.sha256.slice(0, 24))}...</p>
-      <p>${item.linked_report_id ? `Linked report: ${escapeHtml(item.linked_report_id)}` : "Unlinked evidence record"}</p>
-      <p>${state.productionAvailable ? `Object key: ${escapeHtml(item.object_key)}` : item.custody.map((event) => escapeHtml(event.action)).join("<br>")}</p>
+    <article class="dataRow">
+      <div class="dataRowMain">
+        <h3>${escapeHtml(item.filename)}</h3>
+        <p><strong>SHA-256:</strong> ${escapeHtml(item.sha256.slice(0, 24))}...</p>
+        <p>${item.linked_report_id ? `Linked report: ${escapeHtml(item.linked_report_id)}` : "Unlinked evidence record"}</p>
+        <p>Object key: ${escapeHtml(item.object_key)}</p>
+      </div>
+      <div class="dataRowMeta">
+        <span class="badge">${item.size_bytes} bytes</span>
+        <span class="badge ${item.sync_allowed ? "ok" : ""}">${item.sync_allowed ? "sync allowed" : "local only"}</span>
+      </div>
     </article>
   `).join("") || `<p class="empty">No evidence records yet.</p>`;
 }
@@ -809,30 +850,34 @@ async function simulateSensor() {
     uptime,
     maintenance_note: uptime ? "" : "Pump inspection requested",
   };
-  if (state.productionAvailable) {
-    if (!body.site_id) throw new Error("Select a production site before simulating a resource event.");
-    await staffApi("/resources/events", { method: "POST", body });
-  } else {
-    delete body.site_id;
-    await api("/api/sensor-events", { method: "POST", body });
-  }
+  if (!body.site_id) throw new Error("Select a production site before simulating a resource event.");
+  await staffApi("/resources/events", { method: "POST", body });
   await loadResources();
 }
 
 async function loadResources() {
-  if (state.productionAvailable && !hasStaffAccess()) {
+  if (!hasStaffAccess()) {
+    state.resources = [];
+    renderDashboardMetrics();
     $("#resourceGrid").innerHTML = `<p class="empty">Sign in to view production resources.</p>`;
     return;
   }
-  const items = state.productionAvailable ? await staffApi("/resources/status") : await api("/api/resources/status");
+  const items = await staffApi("/resources/status");
+  state.resources = items;
+  renderDashboardMetrics();
+  $("#resourceGrid").className = "dataList";
   $("#resourceGrid").innerHTML = items.map((item) => `
-    <article class="card">
-      <h3>${escapeHtml(item.resource_id)}</h3>
-      <span class="badge ${item.anomaly === "normal" ? "" : "risk"}">${escapeHtml(item.anomaly)}</span>
-      <p>Queue: ${item.queue_length}</p>
-      <p>Flow: ${item.flow_rate}</p>
-      <p>Uptime: ${item.uptime ? "online" : "offline"}</p>
-      <p>${escapeHtml(item.maintenance_note || "No maintenance note")}</p>
+    <article class="dataRow">
+      <div class="dataRowMain">
+        <h3>${escapeHtml(item.resource_id)}</h3>
+        <p>${escapeHtml(item.maintenance_note || "No maintenance note")}</p>
+      </div>
+      <div class="dataRowMeta">
+        <span class="badge ${item.anomaly === "normal" ? "ok" : "risk"}">${escapeHtml(item.anomaly)}</span>
+        <span class="badge">Queue ${item.queue_length}</span>
+        <span class="badge">Flow ${item.flow_rate}</span>
+        <span class="badge">${item.uptime ? "online" : "offline"}</span>
+      </div>
     </article>
   `).join("") || `<p class="empty">No resource events yet.</p>`;
 }
@@ -841,26 +886,24 @@ async function submitRouteAlert(event) {
   event.preventDefault();
   try {
     const body = formData(event.currentTarget);
-    if (state.productionAvailable) body.site_id = currentSiteId();
-    const alert = state.productionAvailable
-      ? await staffApi("/routes/alerts", { method: "POST", body })
-      : await api("/api/routes/alerts", { method: "POST", body });
+    body.site_id = currentSiteId();
+    const alert = await staffApi("/routes/alerts", { method: "POST", body });
     $("#routeResult").textContent = `Route alert added for ${alert.route_label}.`;
     event.currentTarget.reset();
     await loadRoutes();
-    if (state.role === "coordinator") await loadSync().catch(() => {});
+    if (hasCoordinatorAccess()) await loadSync().catch(() => {});
   } catch (error) {
     $("#routeResult").textContent = error.message;
   }
 }
 
 async function loadRoutes() {
-  if (state.productionAvailable && !hasStaffAccess()) {
+  if (!hasStaffAccess()) {
     $("#servicePointGrid").innerHTML = `<p class="empty">Sign in to view production routes.</p>`;
     $("#routeAlertGrid").innerHTML = "";
     return;
   }
-  const status = state.productionAvailable ? await staffApi("/routes/status") : await api("/api/routes/status");
+  const status = await staffApi("/routes/status");
   $("#servicePointGrid").innerHTML = status.service_points.map((point) => `
     <article class="routeTile ${point.status}">
       <span>${escapeHtml(point.kind)}</span>
@@ -869,13 +912,18 @@ async function loadRoutes() {
       <em>${escapeHtml(point.status)}</em>
     </article>
   `).join("");
+  $("#routeAlertGrid").className = "dataList";
   $("#routeAlertGrid").innerHTML = status.alerts.map((alert) => `
-    <article class="card">
-      <h3>${escapeHtml(alert.route_label)}</h3>
-      <span class="badge ${alert.status === "open" ? "" : "risk"}">${escapeHtml(alert.status)}</span>
-      <span class="badge">${escapeHtml(alert.alert_type.replaceAll("_", " "))}</span>
-      <p><strong>Area:</strong> ${escapeHtml(alert.rough_location)}</p>
-      <p>${escapeHtml(alert.note || "No steward note")}</p>
+    <article class="dataRow">
+      <div class="dataRowMain">
+        <h3>${escapeHtml(alert.route_label)}</h3>
+        <p><strong>Area:</strong> ${escapeHtml(alert.rough_location)}</p>
+        <p>${escapeHtml(alert.note || "No steward note")}</p>
+      </div>
+      <div class="dataRowMeta">
+        <span class="badge ${alert.status === "open" ? "ok" : "risk"}">${escapeHtml(alert.status)}</span>
+        <span class="badge">${escapeHtml(alert.alert_type.replaceAll("_", " "))}</span>
+      </div>
     </article>
   `).join("") || `<p class="empty">No route alerts yet.</p>`;
 }
@@ -884,32 +932,35 @@ async function submitOpportunity(event) {
   event.preventDefault();
   try {
     const body = formData(event.currentTarget);
-    if (state.productionAvailable) body.site_id = currentSiteId();
-    const opportunity = state.productionAvailable
-      ? await staffApi("/work/opportunities", { method: "POST", body })
-      : await api("/api/work/opportunities", { method: "POST", body });
+    body.site_id = currentSiteId();
+    const opportunity = await staffApi("/work/opportunities", { method: "POST", body });
     $("#workResult").textContent = `Opportunity added: ${opportunity.title}.`;
     event.currentTarget.reset();
     await loadOpportunities();
-    if (state.role === "coordinator") await loadSync().catch(() => {});
+    if (hasCoordinatorAccess()) await loadSync().catch(() => {});
   } catch (error) {
     $("#workResult").textContent = error.message;
   }
 }
 
 async function loadOpportunities() {
-  if (state.productionAvailable && !hasStaffAccess()) {
+  if (!hasStaffAccess()) {
     $("#workGrid").innerHTML = `<p class="empty">Sign in to view production opportunities.</p>`;
     return;
   }
-  const items = state.productionAvailable ? await staffApi("/work/opportunities") : await api("/api/work/opportunities");
+  const items = await staffApi("/work/opportunities");
+  $("#workGrid").className = "dataList";
   $("#workGrid").innerHTML = items.map((item) => `
-    <article class="card">
-      <h3>${escapeHtml(item.title)}</h3>
-      <span class="badge">${escapeHtml(item.skill_category)}</span>
-      <span class="badge ${item.verification_status === "steward_checked" ? "" : "risk"}">${escapeHtml(item.verification_status.replaceAll("_", " "))}</span>
-      <p><strong>Area:</strong> ${escapeHtml(item.rough_location)}</p>
-      <p>${escapeHtml(item.safety_note || "No safety note")}</p>
+    <article class="dataRow">
+      <div class="dataRowMain">
+        <h3>${escapeHtml(item.title)}</h3>
+        <p><strong>Area:</strong> ${escapeHtml(item.rough_location)}</p>
+        <p>${escapeHtml(item.safety_note || "No safety note")}</p>
+      </div>
+      <div class="dataRowMeta">
+        <span class="badge">${escapeHtml(item.skill_category)}</span>
+        <span class="badge ${item.verification_status === "steward_checked" ? "ok" : "risk"}">${escapeHtml(item.verification_status.replaceAll("_", " "))}</span>
+      </div>
     </article>
   `).join("") || `<p class="empty">No opportunities yet.</p>`;
 }
@@ -927,41 +978,145 @@ function prepareExploitationReport() {
 async function submitRumor(event) {
   event.preventDefault();
   const body = formData(event.currentTarget);
-  if (state.productionAvailable) body.site_id = currentSiteId();
-  if (state.productionAvailable) {
-    await staffApi("/rumors", { method: "POST", body });
-  } else {
-    await api("/api/rumors", { method: "POST", body });
-  }
+  body.site_id = currentSiteId();
+  await staffApi("/rumors", { method: "POST", body });
   event.currentTarget.reset();
   await loadRumors();
 }
 
 async function loadRumors() {
-  if (state.productionAvailable && !hasStaffAccess()) {
+  if (!hasStaffAccess()) {
     $("#rumorGrid").innerHTML = `<p class="empty">Sign in to view production rumor clusters.</p>`;
     return;
   }
-  const clusters = state.productionAvailable ? await staffApi("/rumors/clusters") : await api("/api/rumors/clusters");
+  const clusters = await staffApi("/rumors/clusters");
+  $("#rumorGrid").className = "dataList";
   $("#rumorGrid").innerHTML = clusters.map((cluster) => `
-    <article class="card">
-      <h3>${escapeHtml(cluster.cluster_key)}</h3>
-      <span class="badge risk">Max severity ${cluster.max_severity}</span>
-      <span class="badge">${cluster.count} report${cluster.count === 1 ? "" : "s"}</span>
-      ${cluster.items.map((item) => `<p>${escapeHtml(item.redacted_text)}<br><strong>Response:</strong> ${escapeHtml(item.response_notes || "Needs steward review")}</p>`).join("")}
+    <article class="dataRow">
+      <div class="dataRowMain">
+        <h3>${escapeHtml(cluster.cluster_key)}</h3>
+        ${cluster.items.map((item) => `<p>${escapeHtml(item.redacted_text)}<br><strong>Response:</strong> ${escapeHtml(item.response_notes || "Needs steward review")}</p>`).join("")}
+      </div>
+      <div class="dataRowMeta">
+        <span class="badge risk">Max severity ${cluster.max_severity}</span>
+        <span class="badge">${cluster.count} report${cluster.count === 1 ? "" : "s"}</span>
+      </div>
     </article>
   `).join("") || `<p class="empty">No rumor clusters yet.</p>`;
 }
 
+async function loadCopilot() {
+  if (!hasStaffAccess()) {
+    $("#copilotIncidentSelect").innerHTML = `<option value="">Sign in required</option>`;
+    $("#copilotRunbooks").innerHTML = `<p class="empty">Sign in to use Copilot.</p>`;
+    $("#copilotInvestigation").innerHTML = "";
+    $("#copilotChat").innerHTML = "";
+    return;
+  }
+  if (!state.incidents.length) {
+    await loadIncidents().catch(() => {});
+  }
+  $("#copilotIncidentSelect").innerHTML = state.incidents.map((incident) => `
+    <option value="${escapeHtml(incident.id)}">${escapeHtml(incident.category.replaceAll("_", " "))} - severity ${incident.severity}</option>
+  `).join("") || `<option value="">No incidents available</option>`;
+  const runbooks = await staffApi("/copilot/runbooks");
+  $("#copilotRunbooks").innerHTML = runbooks.map((item) => `
+    <p><strong>${escapeHtml(item.title)}</strong><br>${escapeHtml(item.category)} · ${escapeHtml(item.tags.join(", "))}</p>
+  `).join("") || `<p class="empty">No runbooks yet.</p>`;
+  if (state.copilotSessionId) {
+    await loadCopilotSession(state.copilotSessionId).catch(() => {
+      state.copilotSessionId = "";
+      localStorage.removeItem("peacepulse-copilot-session");
+    });
+  }
+}
+
+async function investigateCopilot(event) {
+  event.preventDefault();
+  const incidentId = $("#copilotIncidentSelect").value;
+  if (!incidentId) {
+    $("#copilotResult").textContent = "Select an incident first.";
+    return;
+  }
+  try {
+    const result = await staffApi(`/copilot/incidents/${incidentId}/investigate`, { method: "POST", body: {} });
+    renderCopilotInvestigation(result);
+    $("#copilotResult").textContent = `Investigation ready for ${result.incident_id}.`;
+  } catch (error) {
+    $("#copilotResult").textContent = error.message;
+  }
+}
+
+function renderCopilotInvestigation(result) {
+  $("#copilotInvestigation").innerHTML = `
+    <article class="card syncItem">
+      <div>
+        <h3>${escapeHtml(result.summary)}</h3>
+        <span class="badge">${result.verification.passed ? "verified" : "review"}</span>
+      </div>
+      <dl>
+        <div><dt>Hypotheses</dt><dd>${result.hypotheses.map(escapeHtml).join("<br>")}</dd></div>
+        <div><dt>Actions</dt><dd>${result.recommended_actions.map(escapeHtml).join("<br>")}</dd></div>
+        <div><dt>Trace</dt><dd>${result.agent_trace.map(escapeHtml).join("<br>")}</dd></div>
+      </dl>
+      <p><strong>Citations:</strong> ${result.citations.map((item) => escapeHtml(item.title)).join(", ") || "none"}</p>
+    </article>
+  `;
+}
+
+async function newCopilotSession() {
+  const incidentId = $("#copilotIncidentSelect").value || null;
+  const session = await staffApi("/copilot/sessions", {
+    method: "POST",
+    body: { incident_id: incidentId, title: incidentId ? `Incident ${incidentId}` : "PeacePulse copilot session" },
+  });
+  state.copilotSessionId = session.id;
+  localStorage.setItem("peacepulse-copilot-session", session.id);
+  renderCopilotSession(session);
+}
+
+async function sendCopilotMessage(event) {
+  event.preventDefault();
+  if (!state.copilotSessionId) {
+    await newCopilotSession();
+  }
+  const session = await staffApi(`/copilot/sessions/${state.copilotSessionId}/messages`, {
+    method: "POST",
+    body: formData(event.currentTarget),
+  });
+  event.currentTarget.reset();
+  state.copilotSessionId = session.id;
+  localStorage.setItem("peacepulse-copilot-session", session.id);
+  renderCopilotSession(session);
+}
+
+async function loadCopilotSession(sessionId) {
+  const session = await staffApi(`/copilot/sessions/${sessionId}`);
+  renderCopilotSession(session);
+}
+
+function renderCopilotSession(session) {
+  $("#copilotChat").innerHTML = session.messages.map((message) => `
+    <article class="card syncItem">
+      <div>
+        <h3>${escapeHtml(message.role)}</h3>
+        <span class="badge">${new Date(message.created_at).toLocaleString()}</span>
+      </div>
+      <p>${escapeHtml(message.content)}</p>
+      ${message.citations.length ? `<p><strong>Citations:</strong> ${message.citations.map((item) => escapeHtml(item.title)).join(", ")}</p>` : ""}
+    </article>
+  `).join("") || `<p class="empty">Start a Copilot chat session.</p>`;
+}
+
 async function loadPrivacyAudit() {
-  if (state.productionAvailable && !hasStaffAccess()) {
+  if (!hasStaffAccess()) {
     $("#privacyCounts").innerHTML = `<p class="empty">Sign in to view the production privacy audit.</p>`;
     $("#privacyLocal").innerHTML = "";
     $("#privacySyncs").innerHTML = "";
     $("#privacyNever").innerHTML = "";
     return;
   }
-  const audit = state.productionAvailable ? await staffApi("/privacy/audit") : await api("/api/privacy/audit");
+  const audit = await staffApi("/privacy/audit");
   $("#privacyCounts").innerHTML = Object.entries(audit.counts).map(([key, value]) => `
     <div class="metricTile">
       <span>${escapeHtml(key.replaceAll("_", " "))}</span>
@@ -978,46 +1133,24 @@ function policyList(items) {
 }
 
 async function loadSync() {
-  if (state.productionAvailable) {
-    if (!hasStaffAccess()) {
-      $("#syncPreview").innerHTML = `<p class="empty">Sign in to view production audit and sync records.</p>`;
-      return;
-    }
-    const [health, auditEvents] = await Promise.all([
-      v1("/health"),
-      hasRole("org_admin", "system_admin") ? staffApi("/audit-events") : Promise.resolve([]),
-    ]);
-    $("#healthHub").textContent = health.ok ? "Online" : "Check";
-    $("#healthDatabase").textContent = health.database || "Unknown";
-    $("#syncStatus").textContent = "Hub sync API ready";
-    $("#healthResource").textContent = "Production v1";
-    $("#healthLastSync").textContent = state.lastSyncAt ? new Date(state.lastSyncAt).toLocaleString() : "Not run";
-    $("#syncPreview").innerHTML = auditEvents.length ? auditEvents.map((item) => `
-      <article class="card syncItem">
-        <h3>${escapeHtml(item.action)}</h3>
-        <span class="badge">${escapeHtml(item.subject_type)}</span>
-        <span class="badge">${new Date(item.created_at).toLocaleString()}</span>
-        <p>${escapeHtml(item.detail || item.subject_id)}</p>
-      </article>
-    `).join("") : `<p class="empty">No production audit events available for this role.</p>`;
+  if (!hasStaffAccess()) {
+    $("#syncPreview").innerHTML = `<p class="empty">Sign in to view production sync records.</p>`;
     return;
   }
-  const [health, resources, preview] = await Promise.all([
-    api("/api/health"),
-    api("/api/resources/status"),
-    api("/api/sync/preview"),
+  const [health, preview] = await Promise.all([
+    v1("/health"),
+    staffApi("/sync/preview"),
   ]);
-  const latestResource = resources.find((item) => item.anomaly !== "normal") || resources[0];
   $("#healthHub").textContent = health.ok ? "Online" : "Check";
   $("#healthDatabase").textContent = health.database || "Unknown";
-  $("#syncStatus").textContent = `${health.sync.pending || 0} pending / ${health.sync.synced || 0} synced`;
-  $("#healthResource").textContent = latestResource ? latestResource.anomaly : "No events";
+  $("#syncStatus").textContent = "Hub sync API ready";
+  $("#healthResource").textContent = "Production v1";
   $("#healthLastSync").textContent = state.lastSyncAt ? new Date(state.lastSyncAt).toLocaleString() : "Not run";
   renderSyncPreview(preview);
 }
 
 async function runSync() {
-  const result = await api("/api/sync/run", { method: "POST", body: {} });
+  const result = await staffApi("/sync/run", { method: "POST", body: {} });
   if (result.synced > 0) {
     state.lastSyncAt = new Date().toISOString();
     localStorage.setItem("peacepulse-last-sync", state.lastSyncAt);
@@ -1051,33 +1184,19 @@ function renderSyncPreview(items) {
 }
 
 async function refreshAll() {
-  await Promise.allSettled([loadIncidents(), loadEvidence(), loadResources(), loadRoutes(), loadOpportunities(), loadRumors(), loadPrivacyAudit(), checkHub()]);
-  if (state.role === "coordinator" || hasRole("coordinator", "org_admin", "system_admin")) await loadSync().catch(() => {});
+  await Promise.allSettled([loadIncidents(), loadEvidence(), loadResources(), loadRoutes(), loadOpportunities(), loadRumors(), loadCopilot(), loadPrivacyAudit(), checkHub()]);
+  if (hasCoordinatorAccess()) await loadSync().catch(() => {});
 }
 
 async function checkHub() {
   try {
     if (state.offline) throw new Error("offline");
-    if (state.productionAvailable) {
-      await v1("/health");
-      $("#apiStatus").textContent = "Production API online";
-    } else {
-      await api("/api/health");
-      $("#apiStatus").textContent = "Hub online";
-    }
+    await v1("/health");
+    $("#apiStatus").textContent = "Production API online";
   } catch {
-    $("#apiStatus").textContent = "Offline demo mode";
+    $("#apiStatus").textContent = "Production API offline";
   }
   $("#offlineToggle").textContent = state.offline ? "Go online" : "Go offline";
-}
-
-function readAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
 }
 
 async function fileSha256(file) {
@@ -1086,28 +1205,14 @@ async function fileSha256(file) {
 }
 
 function applyRole() {
-  if (state.productionAvailable) {
-    if (hasRole("org_admin", "system_admin")) {
-      state.role = "coordinator";
-    } else if (hasRole("coordinator")) {
-      state.role = "coordinator";
-    } else if (hasRole("steward")) {
-      state.role = "steward";
-    } else {
-      state.role = "community";
-    }
-  }
-  $("#roleSelect").value = state.role;
   $$("[data-role]").forEach((item) => {
     const required = item.dataset.role;
-    const visible = state.productionAvailable
-      ? hasStaffAccess() && (required === "steward" || hasRole("coordinator", "org_admin", "system_admin"))
-      : state.role === required || (required === "steward" && state.role === "coordinator");
+    const visible = hasStaffAccess() && (required === "steward" || hasCoordinatorAccess());
     item.hidden = !visible;
   });
   const activeTab = $(".tab.active");
   if (activeTab?.hidden) activateView("report");
-  if (state.role === "coordinator" || hasRole("coordinator", "org_admin", "system_admin")) loadSync().catch(() => {});
+  if (hasCoordinatorAccess()) loadSync().catch(() => {});
 }
 
 function escapeHtml(value) {
@@ -1131,12 +1236,6 @@ function bind() {
     localStorage.setItem("peacepulse-offline", state.offline);
     checkHub();
   });
-  $("#roleSelect").addEventListener("change", () => {
-    if (state.productionAvailable) return;
-    state.role = $("#roleSelect").value;
-    localStorage.setItem("peacepulse-role", state.role);
-    applyRole();
-  });
   $("#bootstrapForm").addEventListener("submit", bootstrapTenant);
   $("#loginForm").addEventListener("submit", loginStaff);
   $("#logoutStaff").addEventListener("click", logoutStaff);
@@ -1156,10 +1255,14 @@ function bind() {
   $("#refreshWork").addEventListener("click", loadOpportunities);
   $("#reportExploitation").addEventListener("click", prepareExploitationReport);
   $("#rumorForm").addEventListener("submit", submitRumor);
+  $("#refreshCopilot").addEventListener("click", loadCopilot);
+  $("#copilotInvestigateForm").addEventListener("submit", investigateCopilot);
+  $("#newCopilotSession").addEventListener("click", newCopilotSession);
+  $("#copilotChatForm").addEventListener("submit", sendCopilotMessage);
   $("#runSync").addEventListener("click", runSync);
   $("#refreshPrivacy").addEventListener("click", loadPrivacyAudit);
   $("#resetDemo").addEventListener("click", resetDemoLog);
-  $("#resetDemoData").addEventListener("click", resetDemoData);
+  $("#clearDemoState").addEventListener("click", clearDemoState);
   $$("[data-demo-action]").forEach((button) => {
     button.addEventListener("click", () => runDemoStep(button.dataset.demoAction));
   });
@@ -1182,10 +1285,12 @@ function bind() {
 function activateView(view) {
   $$(".tab").forEach((item) => item.classList.toggle("active", item.dataset.view === view));
   $$(".view").forEach((item) => item.classList.toggle("active", item.id === view));
+  $("#viewTitle").textContent = VIEW_TITLES[view] || "PeacePulse Hub";
   if (view === "sync") loadSync().catch(() => {});
   if (view === "privacy") loadPrivacyAudit().catch(() => {});
   if (view === "routes") loadRoutes().catch(() => {});
   if (view === "work") loadOpportunities().catch(() => {});
+  if (view === "copilot") loadCopilot().catch(() => {});
 }
 
 if ("serviceWorker" in navigator) {

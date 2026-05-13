@@ -7,19 +7,14 @@ import struct
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import unittest
 import urllib.error
 import urllib.parse
 import urllib.request
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-sys.path.append(str(Path(__file__).resolve().parents[1] / "services" / "api"))
-
-import peacepulse_core as core
-import server
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class BrowserSmokeTests(unittest.TestCase):
@@ -35,22 +30,72 @@ class BrowserSmokeTests(unittest.TestCase):
 
         cls.tmp = tempfile.TemporaryDirectory()
         cls.root = Path(cls.tmp.name)
-        cls.original_data_dir = core.DATA_DIR
-        cls.original_db_path = core.DB_PATH
-        cls.original_evidence_dir = core.EVIDENCE_DIR
-        core.DATA_DIR = cls.root / "data"
-        core.DB_PATH = core.DATA_DIR / "peacepulse.db"
-        core.EVIDENCE_DIR = core.DATA_DIR / "storage" / "evidence"
-        core.init_db(seed_demo_data=True)
+        try:
+            cls.port = cls._free_port()
+        except PermissionError as exc:
+            cls.tmp.cleanup()
+            raise unittest.SkipTest("Local socket access is required for browser smoke tests.") from exc
+        cls.base_url = f"http://127.0.0.1:{cls.port}"
 
-        cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), QuietHandler)
-        cls.base_url = f"http://127.0.0.1:{cls.httpd.server_port}"
-        cls.thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
-        cls.thread.start()
+        env = os.environ.copy()
+        env["PEACEPULSE_ENV"] = "development"
+        env["PEACEPULSE_DATABASE_URL"] = f"sqlite:///{(cls.root / 'peacepulse-prod.db').as_posix()}"
+        env["PEACEPULSE_EVIDENCE_STORAGE_DIR"] = str(cls.root / "storage" / "evidence-prod")
+        cls.server_proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "services.api_prod.app:app",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(cls.port),
+            ],
+            cwd=ROOT,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        cls._wait_for_api_health()
+
+        bootstrap = cls._request_json(
+            "POST",
+            "/api/v1/admin/bootstrap",
+            {
+                "organization_name": "Demo Org",
+                "site_name": "North Site",
+                "site_rough_location": "North zone",
+                "admin_email": "admin@example.org",
+                "admin_password": "change-this-password",
+                "admin_name": "Admin",
+            },
+            expected={201},
+        )
+        cls.site_id = bootstrap["site_id"]
+        login = cls._request_json(
+            "POST",
+            "/api/v1/auth/login",
+            {"email": "admin@example.org", "password": "change-this-password", "mfa_code": "000000"},
+            expected={200},
+        )
+        cls.access_token = login["access_token"]
+        cls.auth_headers = {"authorization": f"Bearer {cls.access_token}"}
+        cls.staff = cls._request_json("GET", "/api/v1/auth/me", headers=cls.auth_headers, expected={200})
+        cls.public_sites = cls._request_json("GET", "/api/v1/public/sites", expected={200})
 
         cls.chrome_dir = cls.root / "chrome-profile"
         cls.chrome_dir.mkdir()
-        cls.chrome_port = cls._free_port()
+        try:
+            cls.chrome_port = cls._free_port()
+        except PermissionError as exc:
+            cls.server_proc.terminate()
+            try:
+                cls.server_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                cls.server_proc.kill()
+            cls.tmp.cleanup()
+            raise unittest.SkipTest("Local socket access is required for browser smoke tests.") from exc
         cls.proc = subprocess.Popen(
             [
                 cls.chromium,
@@ -76,8 +121,11 @@ class BrowserSmokeTests(unittest.TestCase):
                 cls.proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 cls.proc.kill()
-            cls.httpd.shutdown()
-            cls.httpd.server_close()
+            cls.server_proc.terminate()
+            try:
+                cls.server_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                cls.server_proc.kill()
             cls.tmp.cleanup()
             raise unittest.SkipTest(f"Chromium could not start headless: {exc}") from exc
 
@@ -91,14 +139,55 @@ class BrowserSmokeTests(unittest.TestCase):
                 cls.proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 cls.proc.kill()
-        if hasattr(cls, "httpd"):
-            cls.httpd.shutdown()
-            cls.httpd.server_close()
-        core.DATA_DIR = cls.original_data_dir
-        core.DB_PATH = cls.original_db_path
-        core.EVIDENCE_DIR = cls.original_evidence_dir
+        if hasattr(cls, "server_proc"):
+            cls.server_proc.terminate()
+            try:
+                cls.server_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                cls.server_proc.kill()
         if hasattr(cls, "tmp"):
             cls.tmp.cleanup()
+
+    @classmethod
+    def _wait_for_api_health(cls):
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            if cls.server_proc.poll() is not None:
+                raise RuntimeError(f"API server exited with status {cls.server_proc.returncode}")
+            try:
+                cls._request_json("GET", "/api/v1/health", expected={200})
+                return
+            except Exception:
+                time.sleep(0.05)
+        raise TimeoutError("Production API did not become healthy in time.")
+
+    @classmethod
+    def _request_json(cls, method, path, payload=None, headers=None, expected=None):
+        body = None
+        request_headers = {"content-type": "application/json"}
+        if headers:
+            request_headers.update(headers)
+        if payload is not None:
+            body = json.dumps(payload).encode("utf-8")
+        request = urllib.request.Request(f"{cls.base_url}{path}", data=body, method=method.upper(), headers=request_headers)
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                status = response.getcode()
+                raw = response.read().decode("utf-8")
+                try:
+                    data = json.loads(raw)
+                except json.JSONDecodeError:
+                    data = {"raw": raw}
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            raw = exc.read().decode("utf-8", errors="replace")
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                data = {"raw": raw}
+        if expected and status not in expected:
+            raise AssertionError(f"Unexpected status {status} for {method} {path}: {data}")
+        return data
 
     @classmethod
     def _wait_for_devtools_url(cls):
@@ -124,12 +213,17 @@ class BrowserSmokeTests(unittest.TestCase):
             return sock.getsockname()[1]
 
     def setUp(self):
-        core.reset_demo_data()
         self.navigate("/")
+        session = json.dumps(self.staff)
+        sites = json.dumps(self.public_sites)
         self.evaluate(
-            """
+            f"""
             localStorage.clear();
             sessionStorage.clear();
+            localStorage.setItem("peacepulse-access-token", {json.dumps(self.access_token)});
+            localStorage.setItem("peacepulse-staff", {json.dumps(session)});
+            localStorage.setItem("peacepulse-public-sites", {json.dumps(sites)});
+            localStorage.setItem("peacepulse-site-id", {json.dumps(self.site_id)});
             """
         )
         self.navigate("/")
@@ -138,7 +232,7 @@ class BrowserSmokeTests(unittest.TestCase):
         self.browser.command("Page.navigate", {"url": f"{self.base_url}{path}"})
         self.evaluate(
             """
-            waitForSmoke(() => document.querySelector("#apiStatus")?.textContent === "Hub online")
+            waitForSmoke(() => document.querySelector("#apiStatus")?.textContent === "Production API online")
             """,
             timeout=5,
         )
@@ -157,17 +251,16 @@ class BrowserSmokeTests(unittest.TestCase):
               form.elements.voice_sync_allowed.checked = true;
               setFile(form.elements.voice_note, "voice-note.webm", "audio/webm", "demo voice bytes");
               form.requestSubmit();
-              await waitForSmoke(() => document.querySelector("#reportResult").textContent.includes("Voice note stored"));
+              await waitForSmoke(() => document.querySelector("#reportResult").textContent.includes("Voice-note metadata stored"));
 
-              document.querySelector("#roleSelect").value = "coordinator";
-              document.querySelector("#roleSelect").dispatchEvent(new Event("change", { bubbles: true }));
               document.querySelector('[data-view="evidence"]').click();
               await waitForSmoke(() => document.querySelector("#evidenceList").textContent.includes("voice-note.webm"));
               document.querySelector('[data-view="sync"]').click();
               await waitForSmoke(() => document.querySelector("#syncPreview").textContent.includes("evidence record"));
 
-              const preview = await fetch("/api/sync/preview").then((response) => response.json());
-              const evidence = await fetch("/api/evidence").then((response) => response.json());
+              const auth = { authorization: `Bearer ${localStorage.getItem("peacepulse-access-token")}` };
+              const preview = await fetch("/api/v1/sync/preview", { headers: auth }).then((response) => response.json());
+              const evidence = await fetch("/api/v1/evidence", { headers: auth }).then((response) => response.json());
               return {
                 result: document.querySelector("#reportResult").textContent,
                 evidenceText: document.querySelector("#evidenceList").textContent,
@@ -180,20 +273,20 @@ class BrowserSmokeTests(unittest.TestCase):
             timeout=8,
         )
 
-        self.assertIn("Voice note stored as linked local evidence", result["result"])
+        self.assertIn("Voice-note metadata stored as linked production evidence", result["result"])
         self.assertIn("voice-note.webm", result["evidenceText"])
         self.assertIn("Linked report: rep_", result["evidenceText"])
         self.assertIn("evidence_record", result["previewJson"])
-        self.assertNotIn("encrypted_path", result["previewJson"])
+        self.assertNotIn("content_base64", result["previewJson"])
         self.assertNotIn("demo voice bytes", result["previewJson"])
-        self.assertIn("encrypted_path", result["evidenceJson"])
+        self.assertIn("object_key", result["evidenceJson"])
 
     def test_offline_queue_keeps_voice_bytes_out_of_browser_queue(self):
         result = self.evaluate(
             """
             (async () => {
               document.querySelector("#offlineToggle").click();
-              await waitForSmoke(() => document.querySelector("#apiStatus").textContent === "Offline demo mode");
+              await waitForSmoke(() => document.querySelector("#apiStatus").textContent === "Production API offline");
 
               const form = document.querySelector("#reportForm");
               form.elements.text.value = "Families need help near the water queue.";
@@ -205,7 +298,7 @@ class BrowserSmokeTests(unittest.TestCase):
               const queue = JSON.parse(localStorage.getItem("peacepulse-report-queue"));
               const offlineMessage = document.querySelector("#reportResult").textContent;
               document.querySelector("#offlineToggle").click();
-              await waitForSmoke(() => document.querySelector("#apiStatus").textContent === "Hub online");
+              await waitForSmoke(() => document.querySelector("#apiStatus").textContent === "Production API online");
               document.querySelector("#flushQueue").click();
               await waitForSmoke(() => document.querySelector("#queueCount").textContent.startsWith("0 pending"));
               return {
@@ -228,24 +321,25 @@ class BrowserSmokeTests(unittest.TestCase):
         result = self.evaluate(
             """
             (async () => {
+              const auth = { authorization: `Bearer ${localStorage.getItem("peacepulse-access-token")}` };
               document.querySelector('[data-view="routes"]').click();
               await waitForSmoke(() => document.querySelector("#servicePointGrid").textContent.includes("Clinic route"));
               const routeForm = document.querySelector("#routeForm");
               routeForm.elements.note.value = "Review after reports near Block C-12 and call +254 700 000 000.";
               routeForm.requestSubmit();
               await waitForSmoke(async () => {
-                const status = await fetch("/api/routes/status").then((response) => response.json());
+                const status = await fetch("/api/v1/routes/status", { headers: auth }).then((response) => response.json());
                 return status.alerts.some((alert) => alert.note.includes("[redacted-location]"));
               });
               await loadRoutes();
 
               document.querySelector('[data-view="work"]').click();
-              await waitForSmoke(() => document.querySelector("#workGrid").textContent.includes("Water committee assistant"));
+              await waitForSmoke(() => document.querySelector("#workGrid").textContent.includes("No opportunities") || document.querySelector("#workGrid").textContent.length > 0);
               const workForm = document.querySelector("#workForm");
               workForm.elements.safety_note.value = "Checked by steward; call +254 700 000 000 only outside the hub.";
               workForm.requestSubmit();
               await waitForSmoke(async () => {
-                const items = await fetch("/api/work/opportunities").then((response) => response.json());
+                const items = await fetch("/api/v1/work/opportunities", { headers: auth }).then((response) => response.json());
                 return items.some((item) => item.safety_note.includes("[redacted-phone]"));
               });
               await loadOpportunities();
@@ -396,11 +490,6 @@ class DevToolsClient:
                 raise ConnectionError("DevTools websocket closed.")
             data += chunk
         return data
-
-
-class QuietHandler(server.Handler):
-    def log_message(self, fmt, *args):
-        pass
 
 
 if __name__ == "__main__":
