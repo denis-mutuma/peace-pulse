@@ -10,6 +10,7 @@ const state = {
   lastSyncAt: localStorage.getItem("peacepulse-last-sync") || "",
   demoLog: JSON.parse(localStorage.getItem("peacepulse-demo-log") || "[]"),
 };
+let suppressReportResultClear = false;
 
 const MAX_EVIDENCE_BYTES = 2_000_000;
 const EVIDENCE_MIME_PREFIXES = ["image/", "audio/", "text/", "application/pdf"];
@@ -428,6 +429,7 @@ async function submitReport(event) {
       throw new Error("Bootstrap or select a production site before submitting a report.");
     }
     const result = await v1(`/public/sites/${siteId}/reports`, { method: "POST", body: payload });
+    let statusMessage = `Submitted and triaged as ${result.incident?.category || result.category} with severity ${result.incident?.severity || result.severity}.`;
     let voiceMessage = "";
     if (voiceFile) {
       if (hasStaffAccess()) {
@@ -441,13 +443,17 @@ async function submitReport(event) {
         voiceMessage = " Voice-note metadata requires staff sign-in; the text report was submitted.";
       }
     }
-    const incident = result.incident || result;
-    setResult(`Submitted and triaged as ${incident.category} with severity ${incident.severity}.${voiceMessage}`);
+    statusMessage += voiceMessage;
+    suppressReportResultClear = true;
+    setResult(statusMessage);
     form.reset();
     form.elements.text.value = "";
     updateTextCount();
     await refreshAll();
+    suppressReportResultClear = false;
+    setResult(statusMessage);
   } catch (error) {
+    suppressReportResultClear = false;
     if (error.queueable) {
       saveQueue([...queue(), { id: newLocalId(), queued_at: new Date().toISOString(), payload }]);
       if (voiceFile) {
@@ -1369,6 +1375,7 @@ function bind() {
     button.addEventListener("click", () => applyGuidedReport(button.dataset.guidedReport));
   });
   $("#reportForm").addEventListener("input", () => {
+    if (suppressReportResultClear) return;
     setResult("");
     updateTextCount();
   });

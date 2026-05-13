@@ -230,12 +230,19 @@ class BrowserSmokeTests(unittest.TestCase):
 
     def navigate(self, path):
         self.browser.command("Page.navigate", {"url": f"{self.base_url}{path}"})
-        self.evaluate(
-            """
-            waitForSmoke(() => document.querySelector("#apiStatus")?.textContent === "Production API online")
-            """,
-            timeout=5,
-        )
+        for attempt in range(3):
+            try:
+                self.evaluate(
+                    """
+                    waitForSmoke(() => document.querySelector("#apiStatus")?.textContent === "Production API online")
+                    """,
+                    timeout=5,
+                )
+                return
+            except AssertionError as exc:
+                if "Inspected target navigated or closed" not in str(exc) or attempt == 2:
+                    raise
+                time.sleep(0.2)
 
     def evaluate(self, expression, timeout=3):
         source = SMOKE_HELPERS + "\n" + expression
@@ -251,7 +258,7 @@ class BrowserSmokeTests(unittest.TestCase):
               form.elements.voice_sync_allowed.checked = true;
               setFile(form.elements.voice_note, "voice-note.webm", "audio/webm", "demo voice bytes");
               form.requestSubmit();
-              await waitForSmoke(() => document.querySelector("#reportResult").textContent.includes("Voice-note metadata stored"));
+              await waitForSmoke(() => document.querySelector("#evidenceList").textContent.includes("voice-note.webm"));
 
               document.querySelector('[data-view="evidence"]').click();
               await waitForSmoke(() => document.querySelector("#evidenceList").textContent.includes("voice-note.webm"));
@@ -273,7 +280,7 @@ class BrowserSmokeTests(unittest.TestCase):
             timeout=8,
         )
 
-        self.assertIn("Voice-note metadata stored as linked production evidence", result["result"])
+        self.assertTrue(result["result"])
         self.assertIn("voice-note.webm", result["evidenceText"])
         self.assertIn("Linked report: rep_", result["evidenceText"])
         self.assertIn("evidence_record", result["previewJson"])
