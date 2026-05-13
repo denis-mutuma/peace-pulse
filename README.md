@@ -29,7 +29,7 @@ The production API supports these optional environment variables:
 - `PEACEPULSE_JWT_SECRET`: signing secret for staff access tokens. Change this before deployment.
 - `PEACEPULSE_BOOTSTRAP_TOKEN`: required in production for first-tenant bootstrap.
 - `PEACEPULSE_EVIDENCE_STORAGE_DIR`: local fallback evidence object directory.
-- `PEACEPULSE_S3_ENDPOINT_URL` and `PEACEPULSE_S3_BUCKET`: optional S3-compatible evidence object storage.
+- `PEACEPULSE_S3_ENDPOINT_URL`, `PEACEPULSE_S3_BUCKET`, `PEACEPULSE_S3_REGION`, `PEACEPULSE_S3_ACCESS_KEY_ID`, and `PEACEPULSE_S3_SECRET_ACCESS_KEY`: optional S3-compatible evidence object storage for presigned PUT uploads. `PEACEPULSE_S3_SESSION_TOKEN`, `PEACEPULSE_S3_FORCE_PATH_STYLE`, and `PEACEPULSE_S3_PRESIGN_EXPIRES_SECONDS` are also supported.
 - `PEACEPULSE_REMOTE_SYNC_URL`, `PEACEPULSE_REMOTE_SYNC_HUB_ID`, and `PEACEPULSE_REMOTE_SYNC_HUB_SECRET`: optional remote coordinator endpoint and signing secret for pushed sync batches.
 
 Bootstrap the first production tenant after starting the API:
@@ -43,7 +43,9 @@ curl -X POST http://localhost:8080/api/v1/admin/bootstrap \
 
 The browser also exposes this bootstrap flow in the Production Access panel. After bootstrapping, sign in with the admin account, enroll MFA from the access panel, and verify a code from an authenticator app. Staff views use `/api/v1` with server-enforced roles.
 
-Evidence uploads are capped at 2 MB and limited to image, audio, text, or PDF content. The hub validates the file hash, strips basic image metadata where feasible, stores encrypted bytes on the local edge, and syncs metadata and hashes only. Raw bytes and local storage paths are not included in the sync preview.
+Evidence uploads are capped at 2 MB and limited to image, audio, text, or PDF content. The hub validates the file hash, strips basic image metadata where feasible, and then either stores encrypted bytes on the local edge or returns a presigned S3 upload target when S3 is configured. In both cases, the hub syncs metadata and hashes only. Raw bytes and local storage paths are not included in the sync preview.
+
+The Sync view shows the active evidence storage mode in the node health strip. When S3 settings are configured together, the browser uploads directly to the object store; otherwise it keeps using the encrypted local fallback.
 
 When `PEACEPULSE_REMOTE_SYNC_URL`, `PEACEPULSE_REMOTE_SYNC_HUB_ID`, and `PEACEPULSE_REMOTE_SYNC_HUB_SECRET` are configured together, the coordinator `Run sync` action pushes signed sync batches to the remote endpoint. If they are unset, the hub stays local-only and keeps the same privacy-safe preview/history behavior.
 

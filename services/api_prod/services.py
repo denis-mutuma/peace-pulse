@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import re
 from typing import Any
+from urllib.parse import quote, urlsplit
 
 import httpx
 from fastapi import HTTPException, status
@@ -35,6 +37,9 @@ from .schemas import (
     SyncBatchIn,
 )
 from .security import hash_password, hash_token, make_token_urlsafe, new_id, now_utc, sign_hub_payload
+
+
+S3_SERVER_SIDE_ENCRYPTION = "AES256"
 
 def require(condition: bool, message: str, code: int = status.HTTP_400_BAD_REQUEST) -> None:
     if not condition:
@@ -219,11 +224,30 @@ def evidence_content_exists(record: models.EvidenceRecord) -> bool:
 
 
 def evidence_upload_url(record: models.EvidenceRecord) -> str:
+    return evidence_upload_target(record)["upload_url"]
+
+
+def evidence_upload_target(record: models.EvidenceRecord) -> dict[str, Any]:
     settings = get_settings()
-    if settings.s3_endpoint_url:
-        return f"{settings.s3_endpoint_url.rstrip('/')}/{settings.s3_bucket}/{record.object_key}"
+    if _evidence_s3_enabled(settings):
+        return {
+            "upload_url": _presigned_s3_put_url(settings, record),
+            "headers": {
+                "content-type": record.mime_type,
+                "x-amz-server-side-encryption": S3_SERVER_SIDE_ENCRYPTION,
+            },
+            "storage_mode": "s3",
+        }
     settings.evidence_storage_dir.mkdir(parents=True, exist_ok=True)
-    return f"/api/v1/evidence/uploads/{record.id}/content"
+    return {
+        "upload_url": f"/api/v1/evidence/uploads/{record.id}/content",
+        "headers": {"x-amz-server-side-encryption": S3_SERVER_SIDE_ENCRYPTION},
+        "storage_mode": "local",
+    }
+
+
+def evidence_storage_mode() -> str:
+    return "s3" if _evidence_s3_enabled(get_settings()) else "local"
 
 
 def strip_evidence_metadata(mime_type: str, content: bytes) -> bytes:
@@ -243,6 +267,97 @@ def _safe_filename(filename: str) -> str:
 def _evidence_storage_path(record: models.EvidenceRecord):
     settings = get_settings()
     return settings.evidence_storage_dir / f"{record.object_key}.enc"
+
+
+def _evidence_s3_enabled(settings: Any) -> bool:
+    return all(
+        (
+            settings.s3_endpoint_url.strip(),
+            settings.s3_bucket.strip(),
+            settings.s3_region.strip(),
+            settings.s3_access_key_id.strip(),
+            settings.s3_secret_access_key.strip(),
+        )
+    )
+
+
+def _presigned_s3_put_url(settings: Any, record: models.EvidenceRecord) -> str:
+    parsed = urlsplit(settings.s3_endpoint_url.strip())
+    if not parsed.scheme or not parsed.netloc:
+        raise RuntimeError("PEACEPULSE_S3_ENDPOINT_URL must include a scheme and host.")
+
+    timestamp = now_utc()
+    amz_date = timestamp.strftime("%Y%m%dT%H%M%SZ")
+    date_stamp = timestamp.strftime("%Y%m%d")
+    scope = f"{date_stamp}/{settings.s3_region.strip()}/s3/aws4_request"
+    credential = f"{settings.s3_access_key_id.strip()}/{scope}"
+    object_key = quote(record.object_key, safe="/-_.~")
+
+    if settings.s3_force_path_style:
+        canonical_uri = _join_url_path(parsed.path, settings.s3_bucket, object_key)
+        host = parsed.netloc
+    else:
+        host = f"{settings.s3_bucket}.{parsed.netloc}"
+        canonical_uri = _join_url_path(parsed.path, object_key)
+
+    query_params = {
+        "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+        "X-Amz-Credential": credential,
+        "X-Amz-Date": amz_date,
+        "X-Amz-Expires": str(int(settings.s3_presign_expires_seconds or 900)),
+        "X-Amz-SignedHeaders": "content-type;host;x-amz-server-side-encryption",
+    }
+    if settings.s3_session_token:
+        query_params["X-Amz-Security-Token"] = settings.s3_session_token.strip()
+
+    canonical_querystring = "&".join(
+        f"{quote(key, safe='-_.~')}={quote(value, safe='-_.~')}"
+        for key, value in sorted(query_params.items())
+    )
+    canonical_headers = (
+        f"content-type:{record.mime_type.strip()}\n"
+        f"host:{host}\n"
+        f"x-amz-server-side-encryption:{S3_SERVER_SIDE_ENCRYPTION}\n"
+    )
+    canonical_request = "\n".join(
+        [
+            "PUT",
+            canonical_uri,
+            canonical_querystring,
+            canonical_headers,
+            "content-type;host;x-amz-server-side-encryption",
+            "UNSIGNED-PAYLOAD",
+        ]
+    )
+    string_to_sign = "\n".join(
+        [
+            "AWS4-HMAC-SHA256",
+            amz_date,
+            scope,
+            hashlib.sha256(canonical_request.encode("utf-8")).hexdigest(),
+        ]
+    )
+    signing_key = _aws4_signing_key(settings.s3_secret_access_key.strip(), date_stamp, settings.s3_region.strip(), "s3")
+    signature = hmac_sha256(signing_key, string_to_sign).hex()
+    separator = "&" if canonical_querystring else ""
+    scheme = parsed.scheme
+    return f"{scheme}://{host}{canonical_uri}?{canonical_querystring}{separator}X-Amz-Signature={signature}"
+
+
+def _join_url_path(*parts: str) -> str:
+    segments = [segment.strip("/") for segment in parts if segment and segment.strip("/")]
+    return "/" + "/".join(segments)
+
+
+def _aws4_signing_key(secret_key: str, date_stamp: str, region: str, service: str) -> bytes:
+    key = f"AWS4{secret_key}".encode("utf-8")
+    for value in (date_stamp, region, service, "aws4_request"):
+        key = hmac_sha256(key, value)
+    return key
+
+
+def hmac_sha256(key: bytes, value: str) -> bytes:
+    return hmac.new(key, value.encode("utf-8"), hashlib.sha256).digest()
 
 
 def _xor_evidence_bytes(content: bytes) -> bytes:

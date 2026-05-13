@@ -6,6 +6,7 @@ import unittest
 import asyncio
 import hashlib
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 from sqlalchemy import create_engine
@@ -171,6 +172,9 @@ class ProductionApiTests(unittest.TestCase):
     def test_evidence_upload_stores_encrypted_content_and_keeps_sync_metadata_only(self):
         token = self.token()
         content = b"\xff\xd8\xff\xe1\x00\x10Exif\x00\x00private-gps\xff\xdaimage-bytes"
+        health = self.client.get("/api/v1/health")
+        self.assertEqual(health.status_code, 200, health.text)
+        self.assertEqual(health.json()["evidence_storage_mode"], "local")
         response = self.client.post(
             "/api/v1/evidence/uploads",
             headers={"authorization": f"Bearer {token}"},
@@ -187,6 +191,7 @@ class ProductionApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 201, response.text)
         payload = response.json()
         self.assertIn("object_key", payload)
+        self.assertTrue(payload["upload_url"].startswith("/api/v1/evidence/uploads/"))
         self.assertNotIn("content_base64", json.dumps(payload))
         stored = self.client.put(
             payload["upload_url"],
@@ -212,6 +217,64 @@ class ProductionApiTests(unittest.TestCase):
         self.assertIn("evidence_record", serialized)
         self.assertNotIn("content_base64", serialized)
         self.assertNotIn(str(encrypted_path), serialized)
+
+    def test_evidence_upload_returns_presigned_s3_put_url_when_configured(self):
+        token = self.token()
+        original_endpoint = app_module.settings.s3_endpoint_url
+        original_bucket = app_module.settings.s3_bucket
+        original_region = app_module.settings.s3_region
+        original_access_key = app_module.settings.s3_access_key_id
+        original_secret_key = app_module.settings.s3_secret_access_key
+        original_session_token = app_module.settings.s3_session_token
+        original_force_path_style = app_module.settings.s3_force_path_style
+        original_expires = app_module.settings.s3_presign_expires_seconds
+        app_module.settings.s3_endpoint_url = "https://s3.example.com"
+        app_module.settings.s3_bucket = "peacepulse-evidence"
+        app_module.settings.s3_region = "eu-west-1"
+        app_module.settings.s3_access_key_id = "AKIAEXAMPLE"
+        app_module.settings.s3_secret_access_key = "secret-example"
+        app_module.settings.s3_session_token = ""
+        app_module.settings.s3_force_path_style = True
+        app_module.settings.s3_presign_expires_seconds = 900
+        try:
+            health = self.client.get("/api/v1/health")
+            self.assertEqual(health.status_code, 200, health.text)
+            self.assertEqual(health.json()["evidence_storage_mode"], "s3")
+
+            response = self.client.post(
+                "/api/v1/evidence/uploads",
+                headers={"authorization": f"Bearer {token}"},
+                json={
+                    "site_id": self.bootstrap_site_id(),
+                    "filename": "voice-note.webm",
+                    "mime_type": "audio/webm",
+                    "size_bytes": 10,
+                    "sha256": "a" * 64,
+                    "sync_allowed": True,
+                },
+            )
+            self.assertEqual(response.status_code, 201, response.text)
+            payload = response.json()
+            parsed = urlsplit(payload["upload_url"])
+            self.assertEqual(parsed.scheme, "https")
+            self.assertEqual(parsed.netloc, "s3.example.com")
+            self.assertTrue(parsed.path.startswith("/peacepulse-evidence/"))
+            query = parse_qs(parsed.query)
+            self.assertEqual(query["X-Amz-Algorithm"][0], "AWS4-HMAC-SHA256")
+            self.assertIn("X-Amz-Credential", query)
+            self.assertIn("X-Amz-Date", query)
+            self.assertIn("X-Amz-Signature", query)
+            self.assertIn("x-amz-server-side-encryption", payload["headers"])
+            self.assertEqual(payload["headers"]["content-type"], "audio/webm")
+        finally:
+            app_module.settings.s3_endpoint_url = original_endpoint
+            app_module.settings.s3_bucket = original_bucket
+            app_module.settings.s3_region = original_region
+            app_module.settings.s3_access_key_id = original_access_key
+            app_module.settings.s3_secret_access_key = original_secret_key
+            app_module.settings.s3_session_token = original_session_token
+            app_module.settings.s3_force_path_style = original_force_path_style
+            app_module.settings.s3_presign_expires_seconds = original_expires
 
     def test_evidence_content_rejects_hash_mismatch(self):
         token = self.token()
@@ -501,6 +564,15 @@ class ProductionApiTests(unittest.TestCase):
                     jwt_secret="not-default",
                     bootstrap_token="boot",
                     remote_sync_url="https://coordinator.example",
+                )
+            )
+        with self.assertRaisesRegex(RuntimeError, "S3_ENDPOINT_URL"):
+            validate_production_settings(
+                Settings(
+                    env="production",
+                    jwt_secret="not-default",
+                    bootstrap_token="boot",
+                    s3_endpoint_url="https://s3.example.com",
                 )
             )
 

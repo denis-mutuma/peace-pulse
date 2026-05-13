@@ -81,7 +81,13 @@ app.add_middleware(
 @app.get("/api/v1/health")
 async def health(db: Annotated[Session, Depends(get_db)]) -> dict[str, object]:
     db.execute(select(1)).scalar_one()
-    return {"ok": True, "service": "peacepulse-api", "database": "ok", "env": settings.env}
+    return {
+        "ok": True,
+        "service": "peacepulse-api",
+        "database": "ok",
+        "env": settings.env,
+        "evidence_storage_mode": services.evidence_storage_mode(),
+    }
 
 
 @app.post("/api/v1/admin/bootstrap", response_model=BootstrapResponse, status_code=201)
@@ -275,11 +281,12 @@ async def create_evidence_upload(
 ) -> EvidenceUploadResponse:
     site = require_site_access(db, principal, payload.site_id)
     record = services.create_evidence_upload(db, site.organization_id, payload)
+    target = services.evidence_upload_target(record)
     return EvidenceUploadResponse(
         id=record.id,
         object_key=record.object_key,
-        upload_url=services.evidence_upload_url(record),
-        headers={"x-amz-server-side-encryption": "AES256"},
+        upload_url=target["upload_url"],
+        headers=target["headers"],
     )
 
 

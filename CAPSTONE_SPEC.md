@@ -1,7 +1,7 @@
 # PeacePulse Capstone Spec
 
 ## Overview
-PeacePulse Hub is a local edge-hub prototype for fragile and displaced communities. It supports anonymous intake, deterministic redaction, human-reviewed triage, evidence metadata handling, resource and rumor monitoring, a runbook-grounded Copilot experience, and low-bandwidth sync simulation.
+PeacePulse Hub is a local edge-hub prototype for fragile and displaced communities. It supports anonymous intake, deterministic redaction, human-reviewed triage, evidence metadata handling, resource and rumor monitoring, a runbook-grounded Copilot experience, low-bandwidth sync simulation, and optional S3-backed evidence uploads.
 
 The current implementation is intentionally local-first. It is not a hardened production surveillance system and does not attempt identity tracking, guilt inference, or exact movement history.
 
@@ -13,7 +13,7 @@ The current implementation is intentionally local-first. It is not a hardened pr
   - The backend redacts report text deterministically and creates an incident record.
 
 - Evidence Locker
-  - Staff can create evidence upload metadata and upload bytes to a local edge path.
+  - Staff can create evidence upload metadata and upload bytes to a local edge path, or receive a presigned S3 upload target when S3 storage is configured.
   - Content is hashed, validated, and encrypted at rest.
   - Sync preview contains metadata and hashes only.
 

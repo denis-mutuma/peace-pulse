@@ -31,6 +31,15 @@ Add these repository secrets before running the `Deploy EC2` workflow:
 - `EC2_SSH_KEY`: private SSH key with access to the instance.
 - `PEACEPULSE_JWT_SECRET`: long random production JWT signing secret.
 - `PEACEPULSE_BOOTSTRAP_TOKEN`: long random token required for first-tenant bootstrap.
+- Optional S3 evidence storage settings:
+  - `PEACEPULSE_S3_ENDPOINT_URL`
+  - `PEACEPULSE_S3_BUCKET`
+  - `PEACEPULSE_S3_REGION`
+  - `PEACEPULSE_S3_ACCESS_KEY_ID`
+  - `PEACEPULSE_S3_SECRET_ACCESS_KEY`
+  - `PEACEPULSE_S3_SESSION_TOKEN`
+  - `PEACEPULSE_S3_FORCE_PATH_STYLE`
+  - `PEACEPULSE_S3_PRESIGN_EXPIRES_SECONDS`
 
 The production API refuses to start with the default JWT secret or without a bootstrap token. The deploy workflow writes those two PeacePulse secrets to `/opt/peacepulse/app/.env`, copies the repository to `/opt/peacepulse/app` with `rsync`, then runs:
 
@@ -55,6 +64,8 @@ docker compose -f infra/docker-compose.yml logs --tail=80 api
 ```
 
 The production health endpoint is `/api/v1/health` and should include `"database": "ok"`. If the browser cannot reach the app, check the instance security group, local firewall rules, and whether Docker mapped `8080:8080`.
+
+If S3 evidence storage is configured, the same health endpoint also reports `"evidence_storage_mode": "s3"`. Keep the bucket CORS policy permissive enough for browser PUT uploads from the app origin, and make sure the configured credentials can sign presigned PUT requests.
 
 ## Backups
 
