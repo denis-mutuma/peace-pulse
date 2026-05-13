@@ -29,11 +29,13 @@ Add these repository secrets before running the `Deploy EC2` workflow:
 - `EC2_HOST`: public DNS name or public IP address for the instance.
 - `EC2_USER`: SSH user, usually `ubuntu` for Ubuntu AMIs.
 - `EC2_SSH_KEY`: private SSH key with access to the instance.
+- `PEACEPULSE_JWT_SECRET`: long random production JWT signing secret.
+- `PEACEPULSE_BOOTSTRAP_TOKEN`: long random token required for first-tenant bootstrap.
 
-Before the first production deployment, set `PEACEPULSE_JWT_SECRET` and `PEACEPULSE_BOOTSTRAP_TOKEN` in the instance environment or Compose environment to long random values. The production API refuses to start with the default JWT secret or without a bootstrap token. The deploy workflow copies the repository to `/opt/peacepulse/app` with `rsync`, then runs:
+The production API refuses to start with the default JWT secret or without a bootstrap token. The deploy workflow writes those two PeacePulse secrets to `/opt/peacepulse/app/.env`, copies the repository to `/opt/peacepulse/app` with `rsync`, then runs:
 
 ```bash
-docker compose -f infra/docker-compose.yml up -d --build
+docker compose --env-file .env -f infra/docker-compose.yml up -d --build
 ```
 
 ## Verification
@@ -62,6 +64,13 @@ Example host cron entry:
 
 ```cron
 15 * * * * cd /opt/peacepulse/app && docker compose -f infra/docker-compose.yml exec -T api /app/infra/backup-sqlite.sh
+```
+
+Verify a backup before relying on it:
+
+```bash
+cd /opt/peacepulse/app
+docker compose -f infra/docker-compose.yml exec -T api /app/infra/backup-sqlite.sh --verify /app/data/backups/peacepulse-YYYYMMDDTHHMMSSZ.db
 ```
 
 ## Troubleshooting

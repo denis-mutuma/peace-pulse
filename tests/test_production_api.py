@@ -531,6 +531,19 @@ class ProductionApiTests(unittest.TestCase):
         self.assertNotIn('value="change-this-password"', html)
         self.assertNotIn('value="000000"', html)
 
+    def test_ci_and_deploy_workflows_use_production_checks(self):
+        root = Path(__file__).resolve().parents[1]
+        ci = (root / ".github" / "workflows" / "ci.yml").read_text()
+        deploy = (root / ".github" / "workflows" / "deploy.yml").read_text()
+        backup = (root / "infra" / "backup-sqlite.sh").read_text()
+
+        self.assertIn("python -m unittest discover -s tests", ci)
+        self.assertIn("node --check apps/web/app.js", ci)
+        self.assertIn("/api/v1/health", deploy)
+        self.assertIn("PEACEPULSE_JWT_SECRET", deploy)
+        self.assertIn("PEACEPULSE_BOOTSTRAP_TOKEN", deploy)
+        self.assertIn("--verify", backup)
+
     def bootstrap_site_id(self):
         # The database is already bootstrapped by token(); fetch the site through a public report failure-free path.
         with self.SessionLocal() as db:

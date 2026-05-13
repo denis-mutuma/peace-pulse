@@ -20,11 +20,11 @@ jobs:
       - name: Deploy
         run: |
           rsync -az --delete -e "ssh -i ~/.ssh/peacepulse" ./ "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/opt/peacepulse/app/"
-          ssh -i ~/.ssh/peacepulse "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" "cd /opt/peacepulse/app && docker compose -f infra/docker-compose.yml up -d --build"
+          ssh -i ~/.ssh/peacepulse "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" "cd /opt/peacepulse/app && printf 'PEACEPULSE_JWT_SECRET=%s\nPEACEPULSE_BOOTSTRAP_TOKEN=%s\n' '${{ secrets.PEACEPULSE_JWT_SECRET }}' '${{ secrets.PEACEPULSE_BOOTSTRAP_TOKEN }}' > .env && chmod 600 .env && docker compose --env-file .env -f infra/docker-compose.yml up -d --build"
       - name: Verify health
         run: |
           for attempt in 1 2 3 4 5; do
-            if curl --fail --silent --show-error "http://${{ secrets.EC2_HOST }}:8080/api/health"; then
+            if curl --fail --silent --show-error "http://${{ secrets.EC2_HOST }}:8080/api/v1/health"; then
               exit 0
             fi
             sleep 5

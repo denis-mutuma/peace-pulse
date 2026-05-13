@@ -10,6 +10,12 @@ DB_PATH="${DATABASE_URL#sqlite:///}"
 BACKUP_DIR="${PEACEPULSE_BACKUP_DIR:-/app/data/backups}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 
+if [[ "${1:-}" == "--verify" ]]; then
+  TARGET="${2:-$DB_PATH}"
+  sqlite3 "$TARGET" "PRAGMA integrity_check;"
+  exit 0
+fi
+
 mkdir -p "$BACKUP_DIR"
 sqlite3 "$DB_PATH" "PRAGMA wal_checkpoint(TRUNCATE);"
 sqlite3 "$DB_PATH" ".backup '$BACKUP_DIR/peacepulse-$STAMP.db'"
