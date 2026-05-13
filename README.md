@@ -1,6 +1,6 @@
 # PeacePulse Hub
 
-PeacePulse Hub is an offline-first community resilience prototype for fragile and displaced communities. It runs as a local edge hub and supports anonymous report intake, deterministic redaction, human-reviewed triage, evidence protection, resource monitoring, rumor triage, runbook-grounded Copilot assistance, and low-bandwidth sync simulation.
+PeacePulse Hub is an offline-first community resilience prototype for fragile and displaced communities. It runs as a local edge hub and supports anonymous report intake, deterministic redaction, human-reviewed triage, evidence protection, resource monitoring, rumor triage, runbook-grounded Copilot assistance, and privacy-safe sync with remote push or local fallback.
 
 ## Quick Start
 
@@ -48,6 +48,8 @@ Evidence uploads are capped at 2 MB and limited to image, audio, text, or PDF co
 The Sync view shows the active evidence storage mode in the node health strip. When S3 settings are configured together, the browser uploads directly to the object store; otherwise it keeps using the encrypted local fallback.
 
 When `PEACEPULSE_REMOTE_SYNC_URL`, `PEACEPULSE_REMOTE_SYNC_HUB_ID`, and `PEACEPULSE_REMOTE_SYNC_HUB_SECRET` are configured together, the coordinator `Run sync` action pushes signed sync batches to the remote endpoint. If they are unset, the hub stays local-only and keeps the same privacy-safe preview/history behavior.
+
+See [Architecture Diagrams](docs/architecture-diagrams.md) for the system architecture, privacy-safe data flow, and five-minute demo flow.
 
 ## Tests
 

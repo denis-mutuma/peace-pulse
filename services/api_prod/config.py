@@ -70,5 +70,5 @@ def validate_production_settings(settings: Settings | None = None) -> None:
     )
     if any(s3_fields) and not all(s3_fields):
         raise RuntimeError(
-            "PEACEPULSE_S3_ENDPOINT_URL, PEACEPULSE_S3_REGION, PEACEPULSE_S3_ACCESS_KEY_ID, and PEACEPULSE_S3_SECRET_ACCESS_KEY must be set together."
+            "PEACEPULSE_S3_ENDPOINT_URL, PEACEPULSE_S3_BUCKET, PEACEPULSE_S3_REGION, PEACEPULSE_S3_ACCESS_KEY_ID, and PEACEPULSE_S3_SECRET_ACCESS_KEY must be set together."
         )

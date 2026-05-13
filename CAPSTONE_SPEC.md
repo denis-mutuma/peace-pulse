@@ -1,7 +1,7 @@
 # PeacePulse Capstone Spec
 
 ## Overview
-PeacePulse Hub is a local edge-hub prototype for fragile and displaced communities. It supports anonymous intake, deterministic redaction, human-reviewed triage, evidence metadata handling, resource and rumor monitoring, a runbook-grounded Copilot experience, low-bandwidth sync simulation, and optional S3-backed evidence uploads.
+PeacePulse Hub is a local edge-hub prototype for fragile and displaced communities. It supports anonymous intake, deterministic redaction, human-reviewed triage, evidence metadata handling, resource and rumor monitoring, a runbook-grounded Copilot experience, privacy-safe sync with remote push or local fallback, and optional S3-backed evidence uploads.
 
 The current implementation is intentionally local-first. It is not a hardened production surveillance system and does not attempt identity tracking, guilt inference, or exact movement history.
 
@@ -13,8 +13,8 @@ The current implementation is intentionally local-first. It is not a hardened pr
   - The backend redacts report text deterministically and creates an incident record.
 
 - Evidence Locker
-  - Staff can create evidence upload metadata and upload bytes to a local edge path, or receive a presigned S3 upload target when S3 storage is configured.
-  - Content is hashed, validated, and encrypted at rest.
+  - Staff can create evidence upload metadata and upload bytes to an encrypted local edge path, or receive a presigned S3 upload target when S3 storage is configured.
+  - Content is hashed and validated before local storage; S3 mode stores raw bytes outside sync payloads through presigned browser upload.
   - Sync preview contains metadata and hashes only.
 
 - Incidents and Triage
@@ -42,6 +42,8 @@ The current implementation is intentionally local-first. It is not a hardened pr
 
 ## Architecture
 
+See [Architecture Diagrams](docs/architecture-diagrams.md) for visual system, privacy, and demo-flow explanations.
+
 - Frontend:
   - Static PWA in `apps/web`.
   - Uses browser storage for offline queueing and session state.
@@ -59,7 +61,7 @@ The current implementation is intentionally local-first. It is not a hardened pr
 ## Key Behaviors
 
 - Reports are anonymous and redacted before becoming incidents.
-- Evidence bytes are kept local and encrypted.
+- Evidence bytes are either encrypted on the local edge or uploaded directly to configured S3 storage; sync still contains metadata and hashes only.
 - Remote sync uses the same privacy-safe batch shape as local preview and must never expose raw evidence bytes, local evidence paths, unredacted report text, or Copilot chat transcripts.
 - The browser can queue text reports offline, but voice-note metadata should only be attached when the hub is reachable.
 - Production bootstrap requires a bootstrap token in production mode.

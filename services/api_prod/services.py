@@ -191,7 +191,7 @@ def create_evidence_upload(db: Session, org_id: str, payload: EvidenceUploadRequ
         sync_allowed=payload.sync_allowed,
     )
     db.add(record)
-    audit(db, org_id, payload.site_id, None, "evidence.upload.created", "evidence", record.id, "Signed upload placeholder created.")
+    audit(db, org_id, payload.site_id, None, "evidence.upload.created", "evidence", record.id, "Evidence upload target created.")
     db.commit()
     db.refresh(record)
     return record
