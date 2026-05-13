@@ -101,6 +101,9 @@ def create_report(db: Session, site: models.Site, payload: ReportCreate) -> tupl
         raw_text=payload.text,
         redacted_text=redacted,
     )
+    db.add(report)
+    db.flush()
+
     category, confidence = classify(payload.text, payload.category_hint)
     terms = keywords(redacted)
     incident = models.Incident(
@@ -118,7 +121,7 @@ def create_report(db: Session, site: models.Site, payload: ReportCreate) -> tupl
     )
     report.status = "triaged"
     report.raw_text = ""
-    db.add_all([report, incident])
+    db.add(incident)
     audit(db, site.organization_id, site.id, None, "report.triaged", "report", report.id, "Raw text purged after triage.")
     db.commit()
     db.refresh(report)
