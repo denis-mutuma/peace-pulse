@@ -151,16 +151,25 @@ async function staffRaw(url, file, headers = {}) {
   if (!state.accessToken) {
     throw new Error("Sign in to upload evidence bytes.");
   }
-  const response = await fetch(url, {
+  const target = new URL(url, window.location.href);
+  const sameOrigin = target.origin === window.location.origin;
+  const response = await fetch(target.toString(), {
     method: "PUT",
     headers: {
-      authorization: `Bearer ${state.accessToken}`,
+      ...(sameOrigin ? { authorization: `Bearer ${state.accessToken}` } : {}),
       "content-type": file.type || "application/octet-stream",
       ...headers,
     },
     body: file,
   });
-  const payload = await response.json();
+  const contentType = response.headers.get("content-type") || "";
+  let payload = {};
+  if (contentType.includes("application/json")) {
+    payload = await response.json();
+  } else {
+    const text = await response.text();
+    payload = text ? { detail: text } : {};
+  }
   if (!response.ok) {
     throw new Error(payload.detail || payload.error || "Upload failed.");
   }
@@ -1246,6 +1255,7 @@ async function loadSync() {
   ]);
   $("#healthHub").textContent = health.ok ? "Online" : "Check";
   $("#healthDatabase").textContent = health.database || "Unknown";
+  $("#healthEvidenceStorage").textContent = health.evidence_storage_mode || "local";
   $("#syncStatus").textContent = preview.length ? `${preview.length} pending` : "No pending records";
   $("#healthResource").textContent = "Production v1";
   $("#healthLastSync").textContent = state.lastSyncAt
