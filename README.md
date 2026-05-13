@@ -42,7 +42,7 @@ curl -X POST http://localhost:8080/api/v1/admin/bootstrap \
 
 The browser also exposes this bootstrap flow in the Production Access panel. After bootstrapping, sign in with the admin account, enroll MFA from the access panel, and verify a code from an authenticator app. Staff views use `/api/v1` with server-enforced roles.
 
-Evidence uploads are capped at 2 MB and limited to image, audio, text, or PDF content. Synced evidence records include metadata and hashes only; encrypted local storage paths are not included in the sync preview.
+Evidence uploads are capped at 2 MB and limited to image, audio, text, or PDF content. The hub validates the file hash, strips basic image metadata where feasible, stores encrypted bytes on the local edge, and syncs metadata and hashes only. Raw bytes and local storage paths are not included in the sync preview.
 
 ## Tests
 
@@ -61,8 +61,9 @@ The suite includes standard-library API tests plus headless browser smoke tests 
 5. Review the redacted incident in the responder dashboard.
 6. Check the evidence hash/custody record and resource anomaly.
 7. Review the related rumor cluster for steward notes.
-8. Toggle offline mode in the browser, submit another report, then go online and flush the queue.
-9. Sign in with coordinator access, inspect the node health/sync preview, and run sync.
+8. Use the judge demo path to prepare report, evidence, resource, rumor, Copilot, and sync preview surfaces.
+9. Toggle offline mode in the browser, submit another report, then go online and flush the queue.
+10. Sign in with coordinator access, inspect the node health/sync preview, and run sync.
 
 See [Manual Test Checklist](docs/manual-test.md) for a fuller smoke test.
 
@@ -88,9 +89,11 @@ Voice-note boundaries:
 
 ## Copilot
 
-PeacePulse Copilot adds a local, runbook-grounded assistant for staff review. It can investigate an incident, return conservative hypotheses, recommend next actions, show an agent trace, and cite the local runbooks used for grounding.
+PeacePulse Copilot adds a local, runbook-grounded assistant for staff review. It can investigate an incident, return conservative hypotheses, recommend next actions, show an agent trace, and cite the local runbooks used for grounding. Retrieval uses a deterministic local vector index over seed and organization runbooks.
 
 Use `GET /api/v1/copilot/runbooks` to list seeded and organization runbooks, `POST /api/v1/copilot/incidents/{incident_id}/investigate` to generate an investigation packet, and `/api/v1/copilot/sessions` plus `/api/v1/copilot/sessions/{session_id}/messages` for persisted staff chat.
+
+Coordinators can add and edit organization runbooks from the Copilot view. Seed runbooks stay read-only.
 
 Copilot uses redacted incident summaries and runbook text only. Chat transcripts remain local to the hub, do not enter coordinator sync preview, and should not be used to collect names, exact shelters, phone numbers, or raw evidence.
 
@@ -152,7 +155,7 @@ The prototype does not identify people, infer guilt, track individual movement, 
 
 ## Privacy Audit
 
-Steward and coordinator roles include a Privacy tab that explains the local-first data policy in the running demo. It shows current record counts, what stays local, what may sync as a redacted summary, and what never syncs.
+Steward and coordinator roles include a Privacy tab that explains the local-first data policy in the running demo. It shows current record counts, what stays local, what may sync as a redacted summary, and what never syncs. Coordinator sync records have durable pending, synced, and failed states.
 
 Use this view during demos to make the safety boundary explicit before showing the coordinator sync preview. The intended message is that PeacePulse supports human review and low-bandwidth coordination without becoming an identity, surveillance, or raw-evidence export system.
 
