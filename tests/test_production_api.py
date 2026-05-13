@@ -3,9 +3,10 @@ import os
 import sys
 import tempfile
 import unittest
+import asyncio
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+import httpx
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -18,6 +19,28 @@ from services.api_prod.db import Base, get_db
 from services.api_prod.security import _totp_at, hash_token, sign_hub_payload
 
 
+class ASGISyncClient:
+    def __init__(self, app):
+        self.app = app
+
+    def request(self, method: str, path: str, **kwargs):
+        async def run_request():
+            transport = httpx.ASGITransport(app=self.app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+                return await client.request(method, path, **kwargs)
+
+        return asyncio.run(run_request())
+
+    def get(self, path: str, **kwargs):
+        return self.request("GET", path, **kwargs)
+
+    def post(self, path: str, **kwargs):
+        return self.request("POST", path, **kwargs)
+
+    def patch(self, path: str, **kwargs):
+        return self.request("PATCH", path, **kwargs)
+
+
 class ProductionApiTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -26,7 +49,7 @@ class ProductionApiTests(unittest.TestCase):
         Base.metadata.create_all(bind=self.engine)
         self.SessionLocal = sessionmaker(bind=self.engine, autoflush=False, autocommit=False, expire_on_commit=False)
 
-        def override_db():
+        async def override_db():
             db = self.SessionLocal()
             try:
                 yield db
@@ -34,7 +57,7 @@ class ProductionApiTests(unittest.TestCase):
                 db.close()
 
         app.dependency_overrides[get_db] = override_db
-        self.client = TestClient(app)
+        self.client = ASGISyncClient(app)
 
     def tearDown(self):
         app.dependency_overrides.clear()
@@ -121,6 +144,22 @@ class ProductionApiTests(unittest.TestCase):
         response = self.client.get("/api/v1/incidents", headers={"x-peacepulse-role": "coordinator"})
 
         self.assertEqual(response.status_code, 401)
+
+    def test_legacy_unversioned_routes_are_not_exposed(self):
+        checks = [
+            ("GET", "/api/health", None),
+            ("POST", "/api/reports", {"text": "Families need help near the water queue."}),
+            ("POST", "/api/demo/reset", {}),
+            ("GET", "/api/routes/status", None),
+            ("GET", "/api/work/opportunities", None),
+        ]
+        for method, path, payload in checks:
+            with self.subTest(path=path):
+                if method == "POST":
+                    response = self.client.post(path, json=payload)
+                else:
+                    response = self.client.get(path)
+                self.assertEqual(response.status_code, 404, response.text)
 
     def test_evidence_upload_metadata_uses_object_key_not_raw_bytes(self):
         token = self.token()
@@ -248,6 +287,62 @@ class ProductionApiTests(unittest.TestCase):
         kinds = {item["kind"] for item in timeline.json()}
         self.assertTrue({"triage", "note", "evidence", "resource", "rumor"}.issubset(kinds))
         self.assertNotIn("Block C-12", json.dumps(timeline.json()))
+
+    def test_copilot_runbooks_investigation_and_chat_are_grounded(self):
+        boot = self.bootstrap()
+        login = self.client.post(
+            "/api/v1/auth/login",
+            json={"email": "admin@example.org", "password": "change-this-password"},
+        )
+        headers = {"authorization": f"Bearer {login.json()['access_token']}"}
+        report = self.client.post(
+            f"/api/v1/public/sites/{boot['site_id']}/reports",
+            json={
+                "rough_location": "North water point",
+                "category_hint": "resource",
+                "text": "Families are turned away after long water queues near Block C-12.",
+            },
+        ).json()
+
+        runbooks = self.client.get("/api/v1/copilot/runbooks", headers=headers)
+        self.assertEqual(runbooks.status_code, 200, runbooks.text)
+        self.assertTrue(any(item["id"] == "rb_resource_pressure" for item in runbooks.json()))
+
+        investigation = self.client.post(f"/api/v1/copilot/incidents/{report['incident_id']}/investigate", headers=headers, json={})
+        self.assertEqual(investigation.status_code, 200, investigation.text)
+        payload = investigation.json()
+        self.assertEqual(payload["incident_id"], report["incident_id"])
+        self.assertTrue(payload["recommended_actions"])
+        self.assertTrue(payload["citations"])
+        self.assertNotIn("Block C-12", json.dumps(payload))
+
+        session = self.client.post(
+            "/api/v1/copilot/sessions",
+            headers=headers,
+            json={"incident_id": report["incident_id"], "title": "Water pressure review"},
+        )
+        self.assertEqual(session.status_code, 201, session.text)
+        reply = self.client.post(
+            f"/api/v1/copilot/sessions/{session.json()['id']}/messages",
+            headers=headers,
+            json={"content": "What should responders do next?"},
+        )
+        self.assertEqual(reply.status_code, 200, reply.text)
+        messages = reply.json()["messages"]
+        self.assertEqual([item["role"] for item in messages], ["user", "assistant"])
+        self.assertIn("Top recommendation", messages[-1]["content"])
+        self.assertTrue(messages[-1]["citations"])
+
+        privacy = self.client.get("/api/v1/privacy/audit", headers=headers)
+        self.assertEqual(privacy.status_code, 200, privacy.text)
+        self.assertEqual(privacy.json()["counts"]["copilot_sessions"], 1)
+        self.assertEqual(privacy.json()["counts"]["copilot_messages"], 2)
+        self.assertIn("Copilot chat transcripts", json.dumps(privacy.json()["never_syncs"]))
+
+        sync_preview = self.client.get("/api/v1/sync/preview", headers=headers)
+        self.assertEqual(sync_preview.status_code, 200, sync_preview.text)
+        self.assertNotIn("What should responders do next?", json.dumps(sync_preview.json()))
+        self.assertNotIn("Top recommendation", json.dumps(sync_preview.json()))
 
     def test_mfa_enrollment_then_login_requires_totp(self):
         token = self.token()

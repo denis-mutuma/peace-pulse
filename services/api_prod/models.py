@@ -182,6 +182,41 @@ class Opportunity(TimestampMixin, Base):
     safety_note: Mapped[str] = mapped_column(String(240), default="", nullable=False)
 
 
+class CopilotRunbook(TimestampMixin, Base):
+    __tablename__ = "copilot_runbooks"
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    organization_id: Mapped[str | None] = mapped_column(ForeignKey("organizations.id"), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    category: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    tags_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    source: Mapped[str] = mapped_column(String(80), default="seed", nullable=False)
+
+
+class CopilotSession(TimestampMixin, Base):
+    __tablename__ = "copilot_sessions"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), nullable=False, index=True)
+    site_id: Mapped[str | None] = mapped_column(ForeignKey("sites.id"), nullable=True, index=True)
+    incident_id: Mapped[str | None] = mapped_column(ForeignKey("incidents.id"), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="active", nullable=False)
+
+
+class CopilotMessage(TimestampMixin, Base):
+    __tablename__ = "copilot_messages"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("copilot_sessions.id"), nullable=False, index=True)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    citations_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    action_payload_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+
+
 class SyncBatch(TimestampMixin, Base):
     __tablename__ = "sync_batches"
     __table_args__ = (UniqueConstraint("hub_device_id", "idempotency_key", name="uq_hub_sync_idempotency"),)

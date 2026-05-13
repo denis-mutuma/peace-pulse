@@ -12,14 +12,19 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import models, services
+from . import copilot, models, services
 from .auth import Principal, current_hub, issue_user_token, require_role, require_site_access
 from .config import ROOT, get_settings, validate_production_settings
 from .db import get_db, init_db
-from .legacy_compat import router as legacy_router
 from .schemas import (
     BootstrapRequest,
     BootstrapResponse,
+    CopilotChatMessageIn,
+    CopilotInvestigationOut,
+    CopilotRunbookCreate,
+    CopilotRunbookOut,
+    CopilotSessionCreate,
+    CopilotSessionOut,
     EvidenceUploadRequest,
     EvidenceUploadResponse,
     IncidentOut,
@@ -58,9 +63,6 @@ settings = get_settings()
 async def lifespan(_app: FastAPI):
     validate_production_settings(settings)
     init_db()
-    from services.api import peacepulse_core as legacy
-
-    legacy.init_db(seed_demo_data=True)
     yield
 
 
@@ -72,17 +74,16 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
     allow_headers=["authorization", "content-type", "x-hub-id", "x-hub-signature"],
 )
-app.include_router(legacy_router)
 
 
 @app.get("/api/v1/health")
-def health(db: Annotated[Session, Depends(get_db)]) -> dict[str, object]:
+async def health(db: Annotated[Session, Depends(get_db)]) -> dict[str, object]:
     db.execute(select(1)).scalar_one()
     return {"ok": True, "service": "peacepulse-api", "database": "ok", "env": settings.env}
 
 
 @app.post("/api/v1/admin/bootstrap", response_model=BootstrapResponse, status_code=201)
-def bootstrap(
+async def bootstrap(
     payload: BootstrapRequest,
     db: Annotated[Session, Depends(get_db)],
     x_bootstrap_token: Annotated[str, Header(alias="X-Bootstrap-Token")] = "",
@@ -93,13 +94,13 @@ def bootstrap(
 
 
 @app.post("/api/v1/auth/login", response_model=TokenResponse)
-def login(payload: LoginRequest, db: Annotated[Session, Depends(get_db)]) -> TokenResponse:
+async def login(payload: LoginRequest, db: Annotated[Session, Depends(get_db)]) -> TokenResponse:
     token = issue_user_token(db, payload.email, payload.password, payload.mfa_code)
     return TokenResponse(access_token=token, expires_in=settings.access_token_minutes * 60)
 
 
 @app.get("/api/v1/auth/me", response_model=MeResponse)
-def me(principal: Annotated[Principal, Depends(require_role("steward", "coordinator", "org_admin", "system_admin"))]) -> MeResponse:
+async def me(principal: Annotated[Principal, Depends(require_role("steward", "coordinator", "org_admin", "system_admin"))]) -> MeResponse:
     return MeResponse(
         user_id=principal.user.id,
         email=principal.user.email,
@@ -111,7 +112,7 @@ def me(principal: Annotated[Principal, Depends(require_role("steward", "coordina
 
 
 @app.post("/api/v1/auth/mfa/enroll", response_model=MfaEnrollResponse)
-def enroll_mfa(
+async def enroll_mfa(
     db: Annotated[Session, Depends(get_db)],
     principal: Annotated[Principal, Depends(require_role("steward", "coordinator", "org_admin", "system_admin"))],
 ) -> MfaEnrollResponse:
@@ -129,7 +130,7 @@ def enroll_mfa(
 
 
 @app.post("/api/v1/auth/mfa/verify-enrollment")
-def verify_mfa_enrollment(
+async def verify_mfa_enrollment(
     payload: MfaVerifyRequest,
     db: Annotated[Session, Depends(get_db)],
     principal: Annotated[Principal, Depends(require_role("steward", "coordinator", "org_admin", "system_admin"))],
@@ -145,7 +146,7 @@ def verify_mfa_enrollment(
 
 
 @app.post("/api/v1/auth/change-password")
-def change_password(
+async def change_password(
     payload: PasswordChangeRequest,
     db: Annotated[Session, Depends(get_db)],
     principal: Annotated[Principal, Depends(require_role("steward", "coordinator", "org_admin", "system_admin"))],
@@ -163,7 +164,7 @@ def change_password(
 
 
 @app.post("/api/v1/auth/logout")
-def logout(
+async def logout(
     db: Annotated[Session, Depends(get_db)],
     principal: Annotated[Principal, Depends(require_role("steward", "coordinator", "org_admin", "system_admin"))],
 ) -> dict[str, bool]:
@@ -173,12 +174,12 @@ def logout(
 
 
 @app.get("/api/v1/public/sites", response_model=list[SiteOut])
-def public_sites(db: Annotated[Session, Depends(get_db)]) -> list[models.Site]:
+async def public_sites(db: Annotated[Session, Depends(get_db)]) -> list[models.Site]:
     return list(db.scalars(select(models.Site).where(models.Site.status == "active").order_by(models.Site.name)))
 
 
 @app.post("/api/v1/public/sites/{site_id}/reports", response_model=ReportResponse, status_code=201)
-def public_report(site_id: str, payload: ReportCreate, db: Annotated[Session, Depends(get_db)]) -> ReportResponse:
+async def public_report(site_id: str, payload: ReportCreate, db: Annotated[Session, Depends(get_db)]) -> ReportResponse:
     site = db.get(models.Site, site_id)
     if not site or site.status != "active":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found.")
@@ -194,7 +195,7 @@ def public_report(site_id: str, payload: ReportCreate, db: Annotated[Session, De
 
 
 @app.get("/api/v1/incidents", response_model=list[IncidentOut])
-def list_incidents(
+async def list_incidents(
     db: Annotated[Session, Depends(get_db)],
     principal: Annotated[Principal, Depends(require_role("steward", "coordinator", "org_admin", "system_admin"))],
     site_id: str | None = None,
@@ -210,7 +211,7 @@ def list_incidents(
 
 
 @app.patch("/api/v1/incidents/{incident_id}/status", response_model=IncidentOut)
-def patch_incident_status(
+async def patch_incident_status(
     incident_id: str,
     payload: StatusPatch,
     db: Annotated[Session, Depends(get_db)],
@@ -225,7 +226,7 @@ def patch_incident_status(
 
 
 @app.post("/api/v1/incidents/{incident_id}/notes", response_model=NoteOut, status_code=201)
-def add_incident_note(
+async def add_incident_note(
     incident_id: str,
     payload: NoteCreate,
     db: Annotated[Session, Depends(get_db)],
@@ -239,7 +240,7 @@ def add_incident_note(
 
 
 @app.get("/api/v1/incidents/{incident_id}/notes", response_model=list[NoteOut])
-def list_incident_notes(
+async def list_incident_notes(
     incident_id: str,
     db: Annotated[Session, Depends(get_db)],
     principal: Annotated[Principal, Depends(require_role("steward", "coordinator", "org_admin"))],
@@ -252,7 +253,7 @@ def list_incident_notes(
 
 
 @app.get("/api/v1/incidents/{incident_id}/timeline", response_model=list[TimelineEventOut])
-def incident_timeline(
+async def incident_timeline(
     incident_id: str,
     db: Annotated[Session, Depends(get_db)],
     principal: Annotated[Principal, Depends(require_role("steward", "coordinator", "org_admin"))],
@@ -265,7 +266,7 @@ def incident_timeline(
 
 
 @app.post("/api/v1/evidence/uploads", response_model=EvidenceUploadResponse, status_code=201)
-def create_evidence_upload(
+async def create_evidence_upload(
     payload: EvidenceUploadRequest,
     db: Annotated[Session, Depends(get_db)],
     principal: Annotated[Principal, Depends(require_role("steward", "coordinator", "org_admin"))],
@@ -281,7 +282,7 @@ def create_evidence_upload(
 
 
 @app.get("/api/v1/evidence")
-def list_evidence(
+async def list_evidence(
     db: Annotated[Session, Depends(get_db)],
     principal: Annotated[Principal, Depends(require_role("steward", "coordinator", "org_admin"))],
     site_id: str | None = None,
@@ -307,7 +308,7 @@ def list_evidence(
 
 
 @app.post("/api/v1/resources/events", status_code=201)
-def create_resource_event(
+async def create_resource_event(
     payload: ResourceEventCreate,
     db: Annotated[Session, Depends(get_db)],
     principal: Annotated[Principal, Depends(require_role("steward", "coordinator", "org_admin"))],
@@ -318,7 +319,7 @@ def create_resource_event(
 
 
 @app.get("/api/v1/resources/status", response_model=list[ResourceEventOut])
-def resource_status(
+async def resource_status(
     db: Annotated[Session, Depends(get_db)],
     principal: Annotated[Principal, Depends(require_role("steward", "coordinator", "org_admin"))],
     site_id: str | None = None,
@@ -331,7 +332,7 @@ def resource_status(
 
 
 @app.post("/api/v1/rumors", status_code=201)
-def create_rumor(
+async def create_rumor(
     payload: RumorCreate,
     db: Annotated[Session, Depends(get_db)],
     principal: Annotated[Principal, Depends(require_role("steward", "coordinator", "org_admin"))],
@@ -342,7 +343,7 @@ def create_rumor(
 
 
 @app.get("/api/v1/rumors/clusters", response_model=list[RumorClusterOut])
-def rumor_clusters(
+async def rumor_clusters(
     db: Annotated[Session, Depends(get_db)],
     principal: Annotated[Principal, Depends(require_role("steward", "coordinator", "org_admin"))],
     site_id: str | None = None,
@@ -355,7 +356,7 @@ def rumor_clusters(
 
 
 @app.get("/api/v1/routes/status", response_model=RouteStatusOut)
-def route_status(
+async def route_status(
     db: Annotated[Session, Depends(get_db)],
     principal: Annotated[Principal, Depends(require_role("steward", "coordinator", "org_admin"))],
     site_id: str | None = None,
@@ -368,7 +369,7 @@ def route_status(
 
 
 @app.post("/api/v1/routes/alerts", response_model=RouteAlertOut, status_code=201)
-def create_route_alert(
+async def create_route_alert(
     payload: RouteAlertCreate,
     db: Annotated[Session, Depends(get_db)],
     principal: Annotated[Principal, Depends(require_role("steward", "coordinator", "org_admin"))],
@@ -378,7 +379,7 @@ def create_route_alert(
 
 
 @app.get("/api/v1/work/opportunities", response_model=list[OpportunityOut])
-def list_opportunities(
+async def list_opportunities(
     db: Annotated[Session, Depends(get_db)],
     principal: Annotated[Principal, Depends(require_role("steward", "coordinator", "org_admin"))],
     site_id: str | None = None,
@@ -391,7 +392,7 @@ def list_opportunities(
 
 
 @app.post("/api/v1/work/opportunities", response_model=OpportunityOut, status_code=201)
-def create_opportunity(
+async def create_opportunity(
     payload: OpportunityCreate,
     db: Annotated[Session, Depends(get_db)],
     principal: Annotated[Principal, Depends(require_role("steward", "coordinator", "org_admin"))],
@@ -400,8 +401,89 @@ def create_opportunity(
     return services.create_opportunity(db, site.organization_id, payload)
 
 
+@app.get("/api/v1/copilot/runbooks", response_model=list[CopilotRunbookOut])
+async def copilot_runbooks(
+    db: Annotated[Session, Depends(get_db)],
+    principal: Annotated[Principal, Depends(require_role("steward", "coordinator", "org_admin", "system_admin"))],
+) -> list[dict[str, object]]:
+    return copilot.list_runbooks(db, principal.primary_org_id)
+
+
+@app.post("/api/v1/copilot/runbooks", response_model=CopilotRunbookOut, status_code=201)
+async def create_copilot_runbook(
+    payload: CopilotRunbookCreate,
+    db: Annotated[Session, Depends(get_db)],
+    principal: Annotated[Principal, Depends(require_role("coordinator", "org_admin", "system_admin"))],
+) -> dict[str, object]:
+    return copilot.create_runbook(db, principal.primary_org_id, payload)
+
+
+@app.post("/api/v1/copilot/incidents/{incident_id}/investigate", response_model=CopilotInvestigationOut)
+async def investigate_incident_with_copilot(
+    incident_id: str,
+    db: Annotated[Session, Depends(get_db)],
+    principal: Annotated[Principal, Depends(require_role("steward", "coordinator", "org_admin", "system_admin"))],
+) -> dict[str, object]:
+    incident = db.get(models.Incident, incident_id)
+    if not incident or incident.organization_id not in principal.organization_ids:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Incident not found.")
+    require_site_access(db, principal, incident.site_id)
+    return copilot.investigate_incident(db, incident)
+
+
+@app.get("/api/v1/copilot/sessions", response_model=list[CopilotSessionOut])
+async def copilot_sessions(
+    db: Annotated[Session, Depends(get_db)],
+    principal: Annotated[Principal, Depends(require_role("steward", "coordinator", "org_admin", "system_admin"))],
+) -> list[dict[str, object]]:
+    site_ids = set() if {"org_admin", "system_admin"}.intersection(principal.roles) else principal.site_ids
+    return copilot.list_sessions(db, principal.primary_org_id, site_ids)
+
+
+@app.post("/api/v1/copilot/sessions", response_model=CopilotSessionOut, status_code=201)
+async def create_copilot_session(
+    payload: CopilotSessionCreate,
+    db: Annotated[Session, Depends(get_db)],
+    principal: Annotated[Principal, Depends(require_role("steward", "coordinator", "org_admin", "system_admin"))],
+) -> dict[str, object]:
+    site_ids = set() if {"org_admin", "system_admin"}.intersection(principal.roles) else principal.site_ids
+    try:
+        return copilot.create_session(db, principal.primary_org_id, site_ids, payload)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+
+@app.get("/api/v1/copilot/sessions/{session_id}", response_model=CopilotSessionOut)
+async def get_copilot_session(
+    session_id: str,
+    db: Annotated[Session, Depends(get_db)],
+    principal: Annotated[Principal, Depends(require_role("steward", "coordinator", "org_admin", "system_admin"))],
+) -> dict[str, object]:
+    session = db.get(models.CopilotSession, session_id)
+    if not session or session.organization_id != principal.primary_org_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Copilot session not found.")
+    if session.site_id and session.site_id not in principal.site_ids and not {"org_admin", "system_admin"}.intersection(principal.roles):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Site access denied.")
+    return copilot.session_out(db, session)
+
+
+@app.post("/api/v1/copilot/sessions/{session_id}/messages", response_model=CopilotSessionOut)
+async def add_copilot_message(
+    session_id: str,
+    payload: CopilotChatMessageIn,
+    db: Annotated[Session, Depends(get_db)],
+    principal: Annotated[Principal, Depends(require_role("steward", "coordinator", "org_admin", "system_admin"))],
+) -> dict[str, object]:
+    session = db.get(models.CopilotSession, session_id)
+    if not session or session.organization_id != principal.primary_org_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Copilot session not found.")
+    if session.site_id and session.site_id not in principal.site_ids and not {"org_admin", "system_admin"}.intersection(principal.roles):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Site access denied.")
+    return copilot.add_message(db, session, payload.content)
+
+
 @app.post("/api/v1/hubs/{hub_id}/sync/batches", response_model=SyncBatchOut)
-def sync_batch(
+async def sync_batch(
     hub_id: str,
     payload: SyncBatchIn,
     hub: Annotated[models.HubDevice, Depends(current_hub)],
@@ -413,15 +495,41 @@ def sync_batch(
 
 
 @app.get("/api/v1/privacy/audit", response_model=PrivacyAuditOut)
-def privacy_audit(
+async def privacy_audit(
     db: Annotated[Session, Depends(get_db)],
     principal: Annotated[Principal, Depends(require_role("coordinator", "org_admin", "system_admin"))],
 ) -> dict[str, object]:
     return services.privacy_audit(db, principal.primary_org_id)
 
 
+@app.get("/api/v1/sync/preview")
+async def sync_preview(
+    db: Annotated[Session, Depends(get_db)],
+    principal: Annotated[Principal, Depends(require_role("coordinator", "org_admin", "system_admin"))],
+    site_id: str | None = None,
+) -> list[dict[str, object]]:
+    if site_id:
+        site = require_site_access(db, principal, site_id)
+        return services.sync_preview(db, site.organization_id, {site.id})
+    site_ids = None if {"org_admin", "system_admin"}.intersection(principal.roles) else principal.site_ids
+    return services.sync_preview(db, principal.primary_org_id, site_ids)
+
+
+@app.post("/api/v1/sync/run")
+async def run_sync(
+    db: Annotated[Session, Depends(get_db)],
+    principal: Annotated[Principal, Depends(require_role("coordinator", "org_admin", "system_admin"))],
+    site_id: str | None = None,
+) -> dict[str, object]:
+    if site_id:
+        site = require_site_access(db, principal, site_id)
+        return services.run_sync(db, site.organization_id, {site.id})
+    site_ids = None if {"org_admin", "system_admin"}.intersection(principal.roles) else principal.site_ids
+    return services.run_sync(db, principal.primary_org_id, site_ids)
+
+
 @app.get("/api/v1/audit-events")
-def audit_events(
+async def audit_events(
     db: Annotated[Session, Depends(get_db)],
     principal: Annotated[Principal, Depends(require_role("org_admin", "system_admin"))],
 ) -> list[dict[str, object]]:
@@ -444,19 +552,25 @@ def audit_events(
     ]
 
 
-# Compatibility endpoints let the existing PWA keep loading while production UI work catches up.
+@app.api_route("/api/{path:path}", methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"])
+async def missing_api_route(path: str) -> None:
+    raise HTTPException(status.HTTP_404_NOT_FOUND, "API route not found.")
+
+
 WEB_ROOT = ROOT / "apps" / "web"
 if WEB_ROOT.exists():
     app.mount("/assets", StaticFiles(directory=WEB_ROOT), name="assets")
 
 
 @app.get("/")
-def index() -> FileResponse:
+async def index() -> FileResponse:
     return FileResponse(WEB_ROOT / "index.html")
 
 
 @app.get("/{path:path}")
-def static_or_spa(path: str) -> FileResponse:
+async def static_or_spa(path: str) -> FileResponse:
+    if path.startswith("api/"):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "API route not found.")
     target = (WEB_ROOT / path).resolve()
     web_root = WEB_ROOT.resolve()
     if target.exists() and target.is_file() and target.is_relative_to(web_root):

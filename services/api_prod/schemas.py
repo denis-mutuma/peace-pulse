@@ -234,6 +234,70 @@ class OpportunityOut(BaseModel):
     created_at: datetime
 
 
+class CopilotRunbookCreate(BaseModel):
+    title: str = Field(min_length=4, max_length=160)
+    category: str = Field(default="operations", max_length=60)
+    content: str = Field(min_length=20, max_length=6000)
+    tags: list[str] = Field(default_factory=list, max_length=12)
+    source: str = Field(default="manual", max_length=80)
+
+
+class CopilotRunbookOut(BaseModel):
+    id: str
+    title: str
+    category: str
+    source: str
+    tags: list[str]
+    excerpt: str
+    created_at: datetime
+
+
+class CopilotCitation(BaseModel):
+    document_id: str
+    title: str
+    category: str
+    score: float
+    excerpt: str
+
+
+class CopilotInvestigationOut(BaseModel):
+    incident_id: str
+    summary: str
+    hypotheses: list[str]
+    recommended_actions: list[str]
+    verification: dict[str, Any]
+    citations: list[CopilotCitation]
+    agent_trace: list[str]
+
+
+class CopilotSessionCreate(BaseModel):
+    incident_id: str | None = None
+    title: str = Field(default="PeacePulse copilot session", max_length=160)
+
+
+class CopilotChatMessageIn(BaseModel):
+    content: str = Field(min_length=2, max_length=2000)
+
+
+class CopilotMessageOut(BaseModel):
+    id: str
+    role: str
+    content: str
+    citations: list[CopilotCitation]
+    action_payload: dict[str, Any]
+    created_at: datetime
+
+
+class CopilotSessionOut(BaseModel):
+    id: str
+    incident_id: str | None
+    title: str
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    messages: list[CopilotMessageOut] = Field(default_factory=list)
+
+
 class TimelineEventOut(BaseModel):
     created_at: datetime
     kind: str

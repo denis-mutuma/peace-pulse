@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import hashlib
 import json
-import re
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -10,6 +8,17 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from . import models
+from .domain import (
+    ALLOWED_EVIDENCE_MIME_PREFIXES,
+    ALLOWED_LANGUAGES,
+    REPORT_CATEGORIES,
+    SERVICE_POINTS,
+    classify,
+    cluster_key,
+    detect_anomaly,
+    public_update,
+    severity_score,
+)
 from .config import get_settings
 from .privacy import keywords, redact
 from .schemas import (
@@ -23,32 +32,6 @@ from .schemas import (
     SyncBatchIn,
 )
 from .security import hash_password, hash_token, make_token_urlsafe, new_id
-
-
-ALLOWED_LANGUAGES = {"en", "sw", "fr", "ar"}
-REPORT_CATEGORIES = {
-    "resource": ["water", "queue", "pump", "food", "stock", "clinic", "distribution", "solar"],
-    "threat": ["threat", "attack", "intimidat", "violence", "weapon", "unsafe"],
-    "corruption": ["bribe", "favor", "divert", "stolen", "corrupt", "abuse"],
-    "service_denial": ["denied", "turned away", "refused", "blocked", "excluded"],
-    "rumor": ["rumor", "heard", "people say", "claim", "spreading"],
-    "unsafe_route": ["road", "route", "checkpoint", "blocked", "bridge"],
-    "work_exploitation": ["work", "wage", "pay", "exploitation", "job"],
-}
-PUBLIC_UPDATE_TEMPLATES = {
-    "en": "Community stewards are reviewing a {category} concern near {location}. Please use verified service points and avoid sharing identifying details.",
-    "sw": "Wasimamizi wa jamii wanapitia suala la {category} karibu na {location}. Tafadhali tumia vituo vilivyothibitishwa na epuka kushiriki taarifa za kumtambulisha mtu.",
-    "fr": "Les relais communautaires examinent une alerte {category} pres de {location}. Utilisez les points de service verifies et evitez les details identifiants.",
-    "ar": "يراجع مشرفو المجتمع بلاغ {category} قرب {location}. استخدموا نقاط الخدمة المؤكدة وتجنبوا مشاركة التفاصيل التي تكشف الهوية.",
-}
-ALLOWED_EVIDENCE_MIME_PREFIXES = ("image/", "audio/", "text/", "application/pdf")
-SERVICE_POINTS = [
-    {"label": "North water point", "kind": "water", "rough_location": "North zone", "status": "open"},
-    {"label": "Clinic route", "kind": "clinic", "rough_location": "East corridor", "status": "review"},
-    {"label": "Support desk", "kind": "support", "rough_location": "Central market", "status": "open"},
-    {"label": "Bridge path", "kind": "route", "rough_location": "South bridge", "status": "caution"},
-]
-
 
 def require(condition: bool, message: str, code: int = status.HTTP_400_BAD_REQUEST) -> None:
     if not condition:
@@ -85,7 +68,12 @@ def bootstrap(db: Session, data: BootstrapRequest) -> dict[str, str]:
         label=f"{site.name} edge hub",
         secret_hash=hash_token(hub_secret),
     )
-    db.add_all([org, site, user, *memberships, hub])
+    db.add(org)
+    db.flush()
+    db.add_all([site, user])
+    db.flush()
+    db.add_all([*memberships, hub])
+    db.flush()
     audit(db, org.id, site.id, user.id, "bootstrap", "organization", org.id, "Initial production tenant created.")
     db.commit()
     return {
@@ -95,39 +83,6 @@ def bootstrap(db: Session, data: BootstrapRequest) -> dict[str, str]:
         "hub_id": hub.id,
         "hub_secret": hub_secret,
     }
-
-
-def classify(text: str, hint: str = "") -> tuple[str, float]:
-    lower = f"{hint} {text}".lower()
-    scores = {category: sum(1 for keyword in terms if keyword in lower) for category, terms in REPORT_CATEGORIES.items()}
-    if hint in REPORT_CATEGORIES:
-        scores[hint] = scores.get(hint, 0) + 3
-    category, score = max(scores.items(), key=lambda item: item[1])
-    if score == 0:
-        return "other", 0.35
-    return category, min(0.95, 0.45 + score * 0.18)
-
-
-def severity_score(text: str, category: str) -> int:
-    lower = text.lower()
-    score = 2
-    if category in {"threat", "service_denial", "corruption"}:
-        score += 1
-    for marker in ["violence", "weapon", "attack", "denied", "turned away", "tension", "diverted", "unsafe"]:
-        if marker in lower:
-            score += 1
-    return max(1, min(5, score))
-
-
-def cluster_key(category: str, location: str, key_terms: list[str]) -> str:
-    anchor = "-".join(key_terms[:3]) or "general"
-    location_key = re.sub(r"[^a-z0-9]+", "-", location.lower()).strip("-") or "unknown"
-    return f"{category}:{location_key}:{anchor}"
-
-
-def public_update(category: str, location: str, language: str) -> str:
-    template = PUBLIC_UPDATE_TEMPLATES.get(language, PUBLIC_UPDATE_TEMPLATES["en"])
-    return template.format(category=category.replace("_", " "), location=location)
 
 
 def create_report(db: Session, site: models.Site, payload: ReportCreate) -> tuple[models.Report, models.Incident]:
@@ -237,17 +192,6 @@ def evidence_upload_url(record: models.EvidenceRecord) -> str:
         return f"{settings.s3_endpoint_url.rstrip('/')}/{settings.s3_bucket}/{record.object_key}"
     settings.evidence_storage_dir.mkdir(parents=True, exist_ok=True)
     return f"local://{record.object_key}"
-
-
-def detect_anomaly(queue_length: int, flow_rate: float, uptime: int) -> str:
-    flags = []
-    if uptime == 0:
-        flags.append("pump offline")
-    if queue_length >= 40:
-        flags.append("queue pressure")
-    if flow_rate < 1.0:
-        flags.append("low flow")
-    return ", ".join(flags) if flags else "normal"
 
 
 def create_resource_event(db: Session, org_id: str, payload: ResourceEventCreate) -> models.ResourceEvent:
@@ -382,6 +326,170 @@ def list_opportunities(db: Session, org_id: str, site_ids: set[str] | None = Non
     return list(db.scalars(query.order_by(models.Opportunity.created_at.desc(), models.Opportunity.id.desc())))
 
 
+def _sync_item(item_type: str, item_id: str, created_at: Any, payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"{item_type}_{item_id}",
+        "created_at": created_at,
+        "item_type": item_type,
+        "item_id": item_id,
+        "status": "pending",
+        "synced_at": None,
+        "payload_keys": sorted(payload.keys()),
+        "summary": payload,
+    }
+
+
+def sync_preview(db: Session, org_id: str, site_ids: set[str] | None = None, limit: int = 20) -> list[dict[str, Any]]:
+    limit = max(1, min(int(limit or 20), 100))
+
+    def scope(query):
+        query = query.where(models.AuditEvent.organization_id == org_id)
+        if site_ids:
+            query = query.where(models.AuditEvent.site_id.in_(site_ids))
+        return query
+
+    previews: list[dict[str, Any]] = []
+
+    incident_query = select(models.Incident).where(models.Incident.organization_id == org_id)
+    if site_ids:
+        incident_query = incident_query.where(models.Incident.site_id.in_(site_ids))
+    for incident in db.scalars(incident_query.order_by(models.Incident.created_at.desc()).limit(limit)):
+        previews.append(
+            _sync_item(
+                "incident_summary",
+                incident.id,
+                incident.created_at,
+                {
+                    "category": incident.category,
+                    "severity": incident.severity,
+                    "cluster_key": incident.cluster_key,
+                    "redacted_text": incident.redacted_text,
+                },
+            )
+        )
+
+    note_query = select(models.IncidentNote).where(models.IncidentNote.organization_id == org_id)
+    if site_ids:
+        note_query = note_query.where(models.IncidentNote.site_id.in_(site_ids))
+    for note in db.scalars(note_query.order_by(models.IncidentNote.created_at.desc()).limit(limit)):
+        previews.append(
+            _sync_item(
+                "incident_note",
+                note.id,
+                note.created_at,
+                {
+                    "incident_id": note.incident_id,
+                    "actor_label": note.actor_user_id or "steward",
+                    "note": note.note,
+                },
+            )
+        )
+
+    evidence_query = select(models.EvidenceRecord).where(models.EvidenceRecord.organization_id == org_id)
+    if site_ids:
+        evidence_query = evidence_query.where(models.EvidenceRecord.site_id.in_(site_ids))
+    for item in db.scalars(evidence_query.where(models.EvidenceRecord.sync_allowed.is_(True)).order_by(models.EvidenceRecord.created_at.desc()).limit(limit)):
+        previews.append(
+            _sync_item(
+                "evidence_record",
+                item.id,
+                item.created_at,
+                {
+                    "filename": item.filename,
+                    "mime_type": item.mime_type,
+                    "sha256": item.sha256,
+                    "size_bytes": item.size_bytes,
+                    "object_key": item.object_key,
+                },
+            )
+        )
+
+    resource_query = select(models.ResourceEvent).where(models.ResourceEvent.organization_id == org_id)
+    if site_ids:
+        resource_query = resource_query.where(models.ResourceEvent.site_id.in_(site_ids))
+    for item in db.scalars(resource_query.order_by(models.ResourceEvent.created_at.desc()).limit(limit)):
+        previews.append(
+            _sync_item(
+                "resource_anomaly",
+                item.id,
+                item.created_at,
+                {
+                    "resource_id": item.resource_id,
+                    "anomaly": item.anomaly,
+                    "queue_length": item.queue_length,
+                    "uptime": item.uptime,
+                },
+            )
+        )
+
+    rumor_query = select(models.Rumor).where(models.Rumor.organization_id == org_id)
+    if site_ids:
+        rumor_query = rumor_query.where(models.Rumor.site_id.in_(site_ids))
+    for item in db.scalars(rumor_query.order_by(models.Rumor.created_at.desc()).limit(limit)):
+        previews.append(
+            _sync_item(
+                "rumor_summary",
+                item.id,
+                item.created_at,
+                {
+                    "rough_location": item.rough_location,
+                    "severity": item.severity,
+                    "cluster_key": item.cluster_key,
+                    "redacted_text": item.redacted_text,
+                },
+            )
+        )
+
+    route_query = select(models.RouteAlert).where(models.RouteAlert.organization_id == org_id)
+    if site_ids:
+        route_query = route_query.where(models.RouteAlert.site_id.in_(site_ids))
+    for item in db.scalars(route_query.order_by(models.RouteAlert.created_at.desc()).limit(limit)):
+        previews.append(
+            _sync_item(
+                "route_alert",
+                item.id,
+                item.created_at,
+                {
+                    "route_label": item.route_label,
+                    "rough_location": item.rough_location,
+                    "alert_type": item.alert_type,
+                    "status": item.status,
+                    "note": item.note,
+                },
+            )
+        )
+
+    opportunity_query = select(models.Opportunity).where(models.Opportunity.organization_id == org_id)
+    if site_ids:
+        opportunity_query = opportunity_query.where(models.Opportunity.site_id.in_(site_ids))
+    for item in db.scalars(opportunity_query.order_by(models.Opportunity.created_at.desc()).limit(limit)):
+        previews.append(
+            _sync_item(
+                "opportunity_summary",
+                item.id,
+                item.created_at,
+                {
+                    "title": item.title,
+                    "skill_category": item.skill_category,
+                    "rough_location": item.rough_location,
+                    "verification_status": item.verification_status,
+                },
+            )
+        )
+
+    return sorted(previews, key=lambda item: item["created_at"], reverse=True)[:limit]
+
+
+def sync_status(db: Session, org_id: str, site_ids: set[str] | None = None) -> dict[str, int]:
+    preview = sync_preview(db, org_id, site_ids)
+    return {"pending": len(preview), "synced": 0}
+
+
+def run_sync(db: Session, org_id: str, site_ids: set[str] | None = None) -> dict[str, Any]:
+    preview = sync_preview(db, org_id, site_ids)
+    return {"synced": len(preview), **sync_status(db, org_id, site_ids)}
+
+
 def incident_timeline(db: Session, incident: models.Incident) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = [
         {
@@ -465,11 +573,25 @@ def privacy_audit(db: Session, org_id: str) -> dict[str, Any]:
         "reports": db.scalar(select(func.count(models.Report.id)).where(models.Report.organization_id == org_id)) or 0,
         "incidents": db.scalar(select(func.count(models.Incident.id)).where(models.Incident.organization_id == org_id)) or 0,
         "evidence": db.scalar(select(func.count(models.EvidenceRecord.id)).where(models.EvidenceRecord.organization_id == org_id)) or 0,
+        "copilot_runbooks": (
+            db.scalar(
+                select(func.count(models.CopilotRunbook.id)).where(
+                    (models.CopilotRunbook.organization_id.is_(None)) | (models.CopilotRunbook.organization_id == org_id)
+                )
+            )
+            or 0
+        ),
+        "copilot_sessions": db.scalar(select(func.count(models.CopilotSession.id)).where(models.CopilotSession.organization_id == org_id)) or 0,
+        "copilot_messages": db.scalar(select(func.count(models.CopilotMessage.id)).where(models.CopilotMessage.organization_id == org_id)) or 0,
         "sync_batches": db.scalar(select(func.count(models.SyncBatch.id)).where(models.SyncBatch.organization_id == org_id)) or 0,
     }
     return {
         "counts": counts,
-        "local_only": ["Raw report text is purged after triage.", "Hub device secrets are stored only as hashes."],
+        "local_only": [
+            "Raw report text is purged after triage.",
+            "Hub device secrets are stored only as hashes.",
+            "Copilot sessions stay on the local hub and use redacted incident context plus runbook citations.",
+        ],
         "syncs": ["Redacted summaries, metadata, and aggregate resource/rumor signals."],
-        "never_syncs": ["Raw evidence bytes in JSON payloads.", "Local evidence paths.", "Unredacted report text."],
+        "never_syncs": ["Raw evidence bytes in JSON payloads.", "Local evidence paths.", "Unredacted report text.", "Copilot chat transcripts."],
     }

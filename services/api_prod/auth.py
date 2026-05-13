@@ -63,7 +63,7 @@ def audit_auth(db: Session, user: models.User | None, action: str, detail: str) 
     db.commit()
 
 
-def current_principal(
+async def current_principal(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
     db: Annotated[Session, Depends(get_db)],
 ) -> Principal:
@@ -81,7 +81,7 @@ def current_principal(
 
 
 def require_role(*roles: str):
-    def dependency(principal: Annotated[Principal, Depends(current_principal)]) -> Principal:
+    async def dependency(principal: Annotated[Principal, Depends(current_principal)]) -> Principal:
         if not principal.roles.intersection(roles):
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Insufficient role.")
         return principal
