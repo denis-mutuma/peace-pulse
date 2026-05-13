@@ -1,0 +1,373 @@
+import json
+import os
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from services.api_prod.app import app
+import services.api_prod.app as app_module
+from services.api_prod.config import Settings, validate_production_settings
+from services.api_prod.db import Base, get_db
+from services.api_prod.security import _totp_at, hash_token, sign_hub_payload
+
+
+class ProductionApiTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        db_path = Path(self.tmp.name) / "prod.db"
+        self.engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+        Base.metadata.create_all(bind=self.engine)
+        self.SessionLocal = sessionmaker(bind=self.engine, autoflush=False, autocommit=False, expire_on_commit=False)
+
+        def override_db():
+            db = self.SessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db] = override_db
+        self.client = TestClient(app)
+
+    def tearDown(self):
+        app.dependency_overrides.clear()
+        self.tmp.cleanup()
+
+    def bootstrap(self):
+        response = self.client.post(
+            "/api/v1/admin/bootstrap",
+            json={
+                "organization_name": "Demo Org",
+                "site_name": "North Site",
+                "site_rough_location": "North zone",
+                "admin_email": "admin@example.org",
+                "admin_password": "change-this-password",
+                "admin_name": "Admin",
+            },
+        )
+        self.assertEqual(response.status_code, 201, response.text)
+        return response.json()
+
+    def token(self):
+        self.bootstrap()
+        response = self.client.post(
+            "/api/v1/auth/login",
+            json={"email": "admin@example.org", "password": "change-this-password", "mfa_code": "000000"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()["access_token"]
+
+    def test_bootstrap_login_and_public_report_purges_raw_text(self):
+        boot = self.bootstrap()
+        sites = self.client.get("/api/v1/public/sites")
+        self.assertEqual(sites.status_code, 200, sites.text)
+        self.assertEqual(sites.json()[0]["id"], boot["site_id"])
+
+        login = self.client.post(
+            "/api/v1/auth/login",
+            json={"email": "admin@example.org", "password": "change-this-password", "mfa_code": "000000"},
+        )
+        self.assertEqual(login.status_code, 200, login.text)
+        me = self.client.get("/api/v1/auth/me", headers={"authorization": f"Bearer {login.json()['access_token']}"})
+        self.assertEqual(me.status_code, 200, me.text)
+        self.assertIn("org_admin", me.json()["roles"])
+        self.assertIn(boot["site_id"], me.json()["site_ids"])
+        self.assertFalse(me.json()["mfa_enabled"])
+
+        report = self.client.post(
+            f"/api/v1/public/sites/{boot['site_id']}/reports",
+            json={
+                "language": "en",
+                "rough_location": "North water point",
+                "category_hint": "resource",
+                "text": "Mr. Kamau says call +254 700 000 000 about Block C-12 water queue tension.",
+            },
+        )
+        self.assertEqual(report.status_code, 201, report.text)
+        payload = report.json()
+        self.assertIn("[redacted-name]", payload["redacted_text"])
+        self.assertIn("[redacted-phone]", payload["redacted_text"])
+        self.assertNotIn("+254 700 000 000", json.dumps(payload))
+
+        incidents = self.client.get("/api/v1/incidents", headers={"authorization": f"Bearer {login.json()['access_token']}"})
+        self.assertEqual(incidents.status_code, 200, incidents.text)
+        self.assertEqual(len(incidents.json()), 1)
+
+    def test_tenant_role_required_for_incidents(self):
+        boot = self.bootstrap()
+        self.client.post(
+            f"/api/v1/public/sites/{boot['site_id']}/reports",
+            json={"text": "Families are turned away after long water queues.", "category_hint": "resource"},
+        )
+
+        response = self.client.get("/api/v1/incidents")
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_browser_role_state_does_not_grant_production_access(self):
+        boot = self.bootstrap()
+        self.client.post(
+            f"/api/v1/public/sites/{boot['site_id']}/reports",
+            json={"text": "Families are turned away after long water queues.", "category_hint": "resource"},
+        )
+
+        response = self.client.get("/api/v1/incidents", headers={"x-peacepulse-role": "coordinator"})
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_evidence_upload_metadata_uses_object_key_not_raw_bytes(self):
+        token = self.token()
+        response = self.client.post(
+            "/api/v1/evidence/uploads",
+            headers={"authorization": f"Bearer {token}"},
+            json={
+                "site_id": self.bootstrap_site_id(),
+                "filename": "photo.jpg",
+                "mime_type": "image/jpeg",
+                "size_bytes": 100,
+                "sha256": "a" * 64,
+                "sync_allowed": True,
+            },
+        )
+
+        self.assertEqual(response.status_code, 201, response.text)
+        payload = response.json()
+        self.assertIn("object_key", payload)
+        self.assertNotIn("content_base64", json.dumps(payload))
+
+    def test_production_modules_are_tenant_scoped_and_redacted(self):
+        token = self.token()
+        site_id = self.bootstrap_site_id()
+        headers = {"authorization": f"Bearer {token}"}
+
+        resource = self.client.post(
+            "/api/v1/resources/events",
+            headers=headers,
+            json={"site_id": site_id, "resource_id": "water-point-north", "queue_length": 52, "flow_rate": 0.4, "uptime": 0},
+        )
+        self.assertEqual(resource.status_code, 201, resource.text)
+        resources = self.client.get("/api/v1/resources/status", headers=headers)
+        self.assertEqual(resources.status_code, 200, resources.text)
+        self.assertIn("pump offline", resources.json()[0]["anomaly"])
+
+        rumor = self.client.post(
+            "/api/v1/rumors",
+            headers=headers,
+            json={
+                "site_id": site_id,
+                "rough_location": "North water point",
+                "text": "Ms. Amina says call +254 700 000 000 because aid is diverted.",
+            },
+        )
+        self.assertEqual(rumor.status_code, 201, rumor.text)
+        clusters = self.client.get("/api/v1/rumors/clusters", headers=headers)
+        self.assertEqual(clusters.status_code, 200, clusters.text)
+        self.assertIn("[redacted-phone]", json.dumps(clusters.json()))
+        self.assertNotIn("+254 700 000 000", json.dumps(clusters.json()))
+
+        route = self.client.post(
+            "/api/v1/routes/alerts",
+            headers=headers,
+            json={
+                "site_id": site_id,
+                "route_label": "Clinic route",
+                "rough_location": "East corridor",
+                "alert_type": "blocked",
+                "status": "blocked",
+                "note": "Review near Block C-12 and call +254 700 000 000.",
+            },
+        )
+        self.assertEqual(route.status_code, 201, route.text)
+        route_status = self.client.get("/api/v1/routes/status", headers=headers)
+        self.assertEqual(route_status.status_code, 200, route_status.text)
+        self.assertIn("[redacted-location]", json.dumps(route_status.json()))
+
+        opportunity = self.client.post(
+            "/api/v1/work/opportunities",
+            headers=headers,
+            json={
+                "site_id": site_id,
+                "title": "Repair assistant for Mr. Kamau",
+                "skill_category": "repair",
+                "rough_location": "Central workshop",
+                "verification_status": "steward_checked",
+                "safety_note": "Do not call +254 700 000 000 in the listing.",
+            },
+        )
+        self.assertEqual(opportunity.status_code, 201, opportunity.text)
+        opportunities = self.client.get("/api/v1/work/opportunities", headers=headers)
+        self.assertEqual(opportunities.status_code, 200, opportunities.text)
+        serialized = json.dumps(opportunities.json())
+        self.assertIn("[redacted-name]", serialized)
+        self.assertIn("[redacted-phone]", serialized)
+
+    def test_production_incident_timeline_combines_module_context(self):
+        boot = self.bootstrap()
+        login = self.client.post(
+            "/api/v1/auth/login",
+            json={"email": "admin@example.org", "password": "change-this-password"},
+        )
+        headers = {"authorization": f"Bearer {login.json()['access_token']}"}
+        report = self.client.post(
+            f"/api/v1/public/sites/{boot['site_id']}/reports",
+            json={"rough_location": "North water point", "category_hint": "resource", "text": "Families are turned away after long water queues."},
+        ).json()
+        self.client.post(f"/api/v1/incidents/{report['incident_id']}/notes", headers=headers, json={"note": "Assign mediation near Block C-12."})
+        self.client.post(
+            "/api/v1/evidence/uploads",
+            headers=headers,
+            json={
+                "site_id": boot["site_id"],
+                "linked_report_id": report["id"],
+                "filename": "note.txt",
+                "mime_type": "text/plain",
+                "size_bytes": 10,
+                "sha256": "b" * 64,
+            },
+        )
+        self.client.post(
+            "/api/v1/resources/events",
+            headers=headers,
+            json={"site_id": boot["site_id"], "resource_id": "water-point-north", "queue_length": 55, "flow_rate": 0.3, "uptime": 0},
+        )
+        self.client.post(
+            "/api/v1/rumors",
+            headers=headers,
+            json={"site_id": boot["site_id"], "rough_location": "North water point", "text": "People say aid is diverted near the water point."},
+        )
+
+        timeline = self.client.get(f"/api/v1/incidents/{report['incident_id']}/timeline", headers=headers)
+        self.assertEqual(timeline.status_code, 200, timeline.text)
+        kinds = {item["kind"] for item in timeline.json()}
+        self.assertTrue({"triage", "note", "evidence", "resource", "rumor"}.issubset(kinds))
+        self.assertNotIn("Block C-12", json.dumps(timeline.json()))
+
+    def test_mfa_enrollment_then_login_requires_totp(self):
+        token = self.token()
+        enroll = self.client.post("/api/v1/auth/mfa/enroll", headers={"authorization": f"Bearer {token}"}, json={})
+        self.assertEqual(enroll.status_code, 200, enroll.text)
+        code = _totp_at(enroll.json()["secret"], int(__import__("time").time() // 30))
+
+        verify = self.client.post(
+            "/api/v1/auth/mfa/verify-enrollment",
+            headers={"authorization": f"Bearer {token}"},
+            json={"code": code},
+        )
+        self.assertEqual(verify.status_code, 200, verify.text)
+
+        no_mfa = self.client.post(
+            "/api/v1/auth/login",
+            json={"email": "admin@example.org", "password": "change-this-password"},
+        )
+        self.assertEqual(no_mfa.status_code, 401)
+        with_mfa = self.client.post(
+            "/api/v1/auth/login",
+            json={"email": "admin@example.org", "password": "change-this-password", "mfa_code": code},
+        )
+        self.assertEqual(with_mfa.status_code, 200, with_mfa.text)
+
+    def test_password_change_invalidates_old_password(self):
+        token = self.token()
+        changed = self.client.post(
+            "/api/v1/auth/change-password",
+            headers={"authorization": f"Bearer {token}"},
+            json={"current_password": "change-this-password", "new_password": "new-production-password"},
+        )
+        self.assertEqual(changed.status_code, 200, changed.text)
+        old_login = self.client.post(
+            "/api/v1/auth/login",
+            json={"email": "admin@example.org", "password": "change-this-password"},
+        )
+        self.assertEqual(old_login.status_code, 401)
+        new_login = self.client.post(
+            "/api/v1/auth/login",
+            json={"email": "admin@example.org", "password": "new-production-password"},
+        )
+        self.assertEqual(new_login.status_code, 200, new_login.text)
+
+    def test_production_settings_reject_default_secret_and_missing_bootstrap_token(self):
+        with self.assertRaisesRegex(RuntimeError, "JWT_SECRET"):
+            validate_production_settings(Settings(env="production", bootstrap_token="boot"))
+        with self.assertRaisesRegex(RuntimeError, "BOOTSTRAP_TOKEN"):
+            validate_production_settings(Settings(env="production", jwt_secret="not-default"))
+
+    def test_production_bootstrap_requires_bootstrap_token(self):
+        original_env = app_module.settings.env
+        original_token = app_module.settings.bootstrap_token
+        app_module.settings.env = "production"
+        app_module.settings.bootstrap_token = "boot-token"
+        try:
+            missing = self.client.post(
+                "/api/v1/admin/bootstrap",
+                json={
+                    "organization_name": "Demo Org",
+                    "site_name": "North Site",
+                    "admin_email": "admin@example.org",
+                    "admin_password": "change-this-password",
+                },
+            )
+            self.assertEqual(missing.status_code, 401)
+            created = self.client.post(
+                "/api/v1/admin/bootstrap",
+                headers={"X-Bootstrap-Token": "boot-token"},
+                json={
+                    "organization_name": "Demo Org",
+                    "site_name": "North Site",
+                    "admin_email": "admin@example.org",
+                    "admin_password": "change-this-password",
+                },
+            )
+            self.assertEqual(created.status_code, 201, created.text)
+        finally:
+            app_module.settings.env = original_env
+            app_module.settings.bootstrap_token = original_token
+
+    def test_frontend_does_not_prefill_default_auth_secrets(self):
+        html = (Path(__file__).resolve().parents[1] / "apps" / "web" / "index.html").read_text()
+        self.assertNotIn('value="change-this-password"', html)
+        self.assertNotIn('value="000000"', html)
+
+    def bootstrap_site_id(self):
+        # The database is already bootstrapped by token(); fetch the site through a public report failure-free path.
+        with self.SessionLocal() as db:
+            from services.api_prod.models import Site
+
+            return db.query(Site).first().id
+
+    def test_signed_hub_sync_rejects_local_only_payload_fields(self):
+        boot = self.bootstrap()
+        payload = {
+            "idempotency_key": "batch-0001",
+            "items": [
+                {"item_type": "incident_summary", "item_id": "inc_1", "payload": {"redacted_text": "[redacted-phone]"}},
+                {"item_type": "evidence_record", "item_id": "evd_1", "payload": {"encrypted_path": "data/storage/evidence.bin"}},
+            ],
+        }
+        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        signature = sign_hub_payload(hash_token(boot["hub_secret"]), body)
+
+        response = self.client.post(
+            f"/api/v1/hubs/{boot['hub_id']}/sync/batches",
+            content=body,
+            headers={
+                "content-type": "application/json",
+                "x-hub-id": boot["hub_id"],
+                "x-hub-signature": signature,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        result = response.json()
+        self.assertEqual(result["accepted"], 1)
+        self.assertEqual(result["rejected"], 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

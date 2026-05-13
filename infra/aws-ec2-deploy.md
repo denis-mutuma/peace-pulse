@@ -30,7 +30,7 @@ Add these repository secrets before running the `Deploy EC2` workflow:
 - `EC2_USER`: SSH user, usually `ubuntu` for Ubuntu AMIs.
 - `EC2_SSH_KEY`: private SSH key with access to the instance.
 
-The deploy workflow copies the repository to `/opt/peacepulse/app` with `rsync`, then runs:
+Before the first production deployment, set `PEACEPULSE_JWT_SECRET` and `PEACEPULSE_BOOTSTRAP_TOKEN` in the instance environment or Compose environment to long random values. The production API refuses to start with the default JWT secret or without a bootstrap token. The deploy workflow copies the repository to `/opt/peacepulse/app` with `rsync`, then runs:
 
 ```bash
 docker compose -f infra/docker-compose.yml up -d --build
@@ -52,7 +52,17 @@ docker compose -f infra/docker-compose.yml ps
 docker compose -f infra/docker-compose.yml logs --tail=80 api
 ```
 
-The health response should include `"database": "ok"`. If the browser cannot reach the app, check the instance security group, local firewall rules, and whether Docker mapped `8080:8080`.
+The production health endpoint is `/api/v1/health` and should include `"database": "ok"`. If the browser cannot reach the app, check the instance security group, local firewall rules, and whether Docker mapped `8080:8080`.
+
+## Backups
+
+The low-cost production profile uses SQLite on the EC2 volume. Schedule `infra/backup-sqlite.sh` from cron or a systemd timer and copy the generated files under `data/backups/` to durable storage. The script checkpoints WAL, creates a consistent SQLite backup, runs `PRAGMA integrity_check`, and removes backups older than 14 days.
+
+Example host cron entry:
+
+```cron
+15 * * * * cd /opt/peacepulse/app && docker compose -f infra/docker-compose.yml exec -T api /app/infra/backup-sqlite.sh
+```
 
 ## Troubleshooting
 

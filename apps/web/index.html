@@ -39,6 +39,66 @@
         <button class="tab" data-view="work">FairWork</button>
       </nav>
 
+      <section id="accessPanel" class="accessPanel">
+        <div class="panel">
+          <div class="sectionHeader">
+            <h2>Production Access</h2>
+            <div class="actions">
+              <button id="logoutStaff" type="button" class="secondary" hidden>Sign out</button>
+            </div>
+          </div>
+          <div id="sessionSummary" class="result" role="status">Checking production API...</div>
+          <div class="accessGrid">
+            <form id="bootstrapForm" class="form compactForm">
+              <label class="wide">Bootstrap token
+                <input name="bootstrap_token" type="password" autocomplete="off" />
+              </label>
+              <label>Organization
+                <input name="organization_name" value="Demo Org" required />
+              </label>
+              <label>Site
+                <input name="site_name" value="North Site" required />
+              </label>
+              <label>Rough location
+                <input name="site_rough_location" value="North zone" />
+              </label>
+              <label>Admin email
+                <input name="admin_email" type="email" autocomplete="username" required />
+              </label>
+              <label>Admin password
+                <input name="admin_password" type="password" autocomplete="new-password" minlength="12" required />
+              </label>
+              <label>Admin name
+                <input name="admin_name" value="Admin" />
+              </label>
+              <button type="submit">Bootstrap tenant</button>
+            </form>
+            <form id="loginForm" class="form compactForm">
+              <label>Email
+                <input name="email" type="email" autocomplete="username" required />
+              </label>
+              <label>Password
+                <input name="password" type="password" autocomplete="current-password" required />
+              </label>
+              <label>MFA code
+                <input name="mfa_code" inputmode="numeric" autocomplete="one-time-code" />
+              </label>
+              <button type="submit">Sign in</button>
+            </form>
+            <form id="mfaForm" class="form compactForm" hidden>
+              <label class="wide">Authenticator secret
+                <input id="mfaSecret" readonly />
+              </label>
+              <label>MFA code
+                <input name="code" inputmode="numeric" autocomplete="one-time-code" required />
+              </label>
+              <button id="startMfa" type="button" class="secondary">Start MFA</button>
+              <button type="submit">Verify MFA</button>
+            </form>
+          </div>
+        </div>
+      </section>
+
       <section id="report" class="view active">
         <div class="panel">
           <h2>Anonymous Report</h2>
@@ -79,6 +139,9 @@
             </label>
             <label>Rough location
               <input name="rough_location" value="North water point" />
+            </label>
+            <label>Public site
+              <select id="publicSiteSelect" aria-label="Public site"></select>
             </label>
             <label>Concern type
               <select name="category_hint">

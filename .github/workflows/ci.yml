@@ -17,3 +17,5 @@ jobs:
         run: uv run python -m unittest discover -s tests
       - name: Check frontend syntax
         run: node --check apps/web/app.js
+      - name: Check production API imports
+        run: uv run python -c "from services.api_prod.app import app; print(app.title)"

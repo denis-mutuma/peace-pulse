@@ -1,6 +1,11 @@
 const state = {
   offline: localStorage.getItem("peacepulse-offline") === "true",
   role: localStorage.getItem("peacepulse-role") || "community",
+  productionAvailable: false,
+  accessToken: "",
+  staff: null,
+  publicSites: JSON.parse(localStorage.getItem("peacepulse-public-sites") || "[]"),
+  selectedSiteId: localStorage.getItem("peacepulse-site-id") || "",
   incidents: [],
   lastSyncAt: localStorage.getItem("peacepulse-last-sync") || "",
   demoLog: JSON.parse(localStorage.getItem("peacepulse-demo-log") || "[]"),
@@ -86,9 +91,13 @@ async function api(path, options = {}) {
   }
   let response;
   try {
+    const headers = { "content-type": "application/json", ...(options.headers || {}) };
+    if (options.auth && state.accessToken) {
+      headers.authorization = `Bearer ${state.accessToken}`;
+    }
     response = await fetch(path, {
-      headers: { "content-type": "application/json" },
       ...options,
+      headers,
       body: options.body ? JSON.stringify(options.body) : undefined,
     });
   } catch (cause) {
@@ -99,11 +108,30 @@ async function api(path, options = {}) {
   }
   const payload = await response.json();
   if (!response.ok) {
-    const error = new Error(payload.error || "Request failed.");
+    const error = new Error(payload.detail || payload.error || "Request failed.");
     error.status = response.status;
+    if (error.status === 401 && options.auth) {
+      saveSession("", null);
+    }
     throw error;
   }
   return payload;
+}
+
+async function v1(path, options = {}) {
+  return api(`/api/v1${path}`, options);
+}
+
+async function staffApi(path, options = {}) {
+  if (!state.productionAvailable) {
+    return api(path.replace("/v1", ""), options);
+  }
+  if (!state.accessToken) {
+    const error = new Error("Sign in to use staff tools.");
+    error.authRequired = true;
+    throw error;
+  }
+  return api(`/api/v1${path}`, { ...options, auth: true });
 }
 
 function formData(form) {
@@ -127,6 +155,155 @@ function setDashboardResult(text) {
 
 function setDemoResult(text) {
   $("#demoResult").textContent = text;
+}
+
+function currentSiteId() {
+  return state.selectedSiteId || state.publicSites[0]?.id || "";
+}
+
+function hasStaffAccess() {
+  return Boolean(state.accessToken && state.staff);
+}
+
+function hasRole(...roles) {
+  return Boolean(state.staff?.roles?.some((role) => roles.includes(role)));
+}
+
+function saveSession(token, staff = null) {
+  state.accessToken = token || "";
+  state.staff = staff;
+  localStorage.removeItem("peacepulse-access-token");
+  localStorage.removeItem("peacepulse-staff");
+  if (staff) {
+    const siteId = staff.site_ids?.[0] || state.selectedSiteId;
+    if (siteId) saveSelectedSite(siteId);
+  } else {
+  }
+  renderAccessState();
+  applyRole();
+}
+
+function savePublicSites(sites) {
+  state.publicSites = sites;
+  localStorage.setItem("peacepulse-public-sites", JSON.stringify(sites));
+  if (!state.selectedSiteId && sites[0]) saveSelectedSite(sites[0].id);
+  renderPublicSites();
+}
+
+function saveSelectedSite(siteId) {
+  state.selectedSiteId = siteId || "";
+  if (state.selectedSiteId) {
+    localStorage.setItem("peacepulse-site-id", state.selectedSiteId);
+  } else {
+    localStorage.removeItem("peacepulse-site-id");
+  }
+  renderPublicSites();
+}
+
+function renderPublicSites() {
+  const select = $("#publicSiteSelect");
+  if (!select) return;
+  if (!state.publicSites.length) {
+    select.innerHTML = `<option value="">Legacy local demo</option>`;
+    return;
+  }
+  select.innerHTML = state.publicSites.map((site) => `
+    <option value="${escapeHtml(site.id)}" ${site.id === state.selectedSiteId ? "selected" : ""}>${escapeHtml(site.name)} - ${escapeHtml(site.rough_location)}</option>
+  `).join("");
+}
+
+function renderAccessState() {
+  $("#accessPanel").hidden = !state.productionAvailable;
+  $("#roleSelect").hidden = state.productionAvailable;
+  $("#logoutStaff").hidden = !hasStaffAccess();
+  $("#mfaForm").hidden = !hasStaffAccess();
+  const summary = $("#sessionSummary");
+  if (!state.productionAvailable) {
+    summary.textContent = "Legacy local demo API is active.";
+    return;
+  }
+  if (hasStaffAccess()) {
+    summary.textContent = `Signed in as ${state.staff.email} (${state.staff.roles.join(", ")}). MFA ${state.staff.mfa_enabled ? "enabled" : "not enrolled"}.`;
+  } else {
+    summary.textContent = "Production API is active. Anonymous reporting is open; staff tools require sign in.";
+  }
+}
+
+async function loadProductionContext() {
+  try {
+    await v1("/health");
+    state.productionAvailable = true;
+    const sites = await v1("/public/sites");
+    savePublicSites(sites);
+    renderAccessState();
+    applyRole();
+  } catch {
+    state.productionAvailable = false;
+    renderAccessState();
+    applyRole();
+  }
+}
+
+async function bootstrapTenant(event) {
+  event.preventDefault();
+  try {
+    const payload = formData(event.currentTarget);
+    const bootstrapToken = payload.bootstrap_token || "";
+    delete payload.bootstrap_token;
+    const result = await v1("/admin/bootstrap", {
+      method: "POST",
+      body: payload,
+      headers: bootstrapToken ? { "X-Bootstrap-Token": bootstrapToken } : {},
+    });
+    saveSelectedSite(result.site_id);
+    await loadProductionContext();
+    $("#sessionSummary").textContent = `Tenant created. Hub id ${result.hub_id}; sign in with the admin account.`;
+  } catch (error) {
+    $("#sessionSummary").textContent = error.message;
+  }
+}
+
+async function loginStaff(event) {
+  event.preventDefault();
+  try {
+    const result = await v1("/auth/login", { method: "POST", body: formData(event.currentTarget) });
+    state.accessToken = result.access_token;
+    const staff = await v1("/auth/me", { auth: true });
+    saveSession(result.access_token, staff);
+    await refreshAll();
+  } catch (error) {
+    $("#sessionSummary").textContent = error.message;
+  }
+}
+
+async function logoutStaff() {
+  if (state.accessToken) {
+    await v1("/auth/logout", { method: "POST", body: {}, auth: true }).catch(() => {});
+  }
+  saveSession("", null);
+  activateView("report");
+}
+
+async function startMfaEnrollment() {
+  try {
+    const result = await staffApi("/auth/mfa/enroll", { method: "POST", body: {} });
+    $("#mfaSecret").value = result.secret;
+    $("#sessionSummary").textContent = "Add the secret to an authenticator app, then verify the current code.";
+  } catch (error) {
+    $("#sessionSummary").textContent = error.message;
+  }
+}
+
+async function verifyMfaEnrollment(event) {
+  event.preventDefault();
+  try {
+    await staffApi("/auth/mfa/verify-enrollment", { method: "POST", body: formData(event.currentTarget) });
+    const staff = await v1("/auth/me", { auth: true });
+    saveSession(state.accessToken, staff);
+    $("#sessionSummary").textContent = "MFA enrollment verified.";
+  } catch (error) {
+    $("#sessionSummary").textContent = error.message;
+  }
 }
 
 function queue() {
@@ -212,9 +389,17 @@ async function submitReport(event) {
   const voiceFile = form.elements.voice_note.files[0];
   try {
     if (voiceFile) validateVoiceNote(voiceFile);
-    const result = await api("/api/reports", { method: "POST", body: payload });
+    const siteId = currentSiteId();
+    if (state.productionAvailable && !siteId) {
+      throw new Error("Bootstrap or select a production site before submitting a report.");
+    }
+    const result = state.productionAvailable
+      ? await v1(`/public/sites/${siteId}/reports`, { method: "POST", body: payload })
+      : await api("/api/reports", { method: "POST", body: payload });
     let voiceMessage = "";
-    if (voiceFile) {
+    if (voiceFile && state.productionAvailable) {
+      voiceMessage = " Voice-note bytes require the legacy local evidence locker until anonymous production evidence intake is enabled.";
+    } else if (voiceFile) {
       try {
         await uploadVoiceNote(result.report.id, voiceFile, form.elements.voice_sync_allowed.checked);
         voiceMessage = " Voice note stored as linked local evidence.";
@@ -222,7 +407,8 @@ async function submitReport(event) {
         voiceMessage = ` Voice note was not stored: ${voiceError.message}`;
       }
     }
-    setResult(`Submitted and triaged as ${result.incident.category} with severity ${result.incident.severity}.${voiceMessage}`);
+    const incident = result.incident || result;
+    setResult(`Submitted and triaged as ${incident.category} with severity ${incident.severity}.${voiceMessage}`);
     form.reset();
     form.elements.text.value = "";
     updateTextCount();
@@ -373,7 +559,15 @@ async function flushQueue() {
   let rejected = 0;
   for (const item of items) {
     try {
-      await api("/api/reports", { method: "POST", body: item.payload });
+      const siteId = currentSiteId();
+      if (state.productionAvailable && !siteId) {
+        throw new Error("No production site selected.");
+      }
+      if (state.productionAvailable) {
+        await v1(`/public/sites/${siteId}/reports`, { method: "POST", body: item.payload });
+      } else {
+        await api("/api/reports", { method: "POST", body: item.payload });
+      }
       accepted += 1;
     } catch (error) {
       if (error.queueable) {
@@ -431,7 +625,11 @@ function renderIncidents(items) {
   $$("[data-status]").forEach((select) => {
     select.addEventListener("change", async () => {
       try {
-        await api(`/api/incidents/${select.dataset.status}/status`, { method: "PATCH", body: { status: select.value } });
+        if (state.productionAvailable) {
+          await staffApi(`/incidents/${select.dataset.status}/status`, { method: "PATCH", body: { status: select.value } });
+        } else {
+          await api(`/api/incidents/${select.dataset.status}/status`, { method: "PATCH", body: { status: select.value } });
+        }
         setDashboardResult("Incident status updated.");
         await loadIncidents();
       } catch (error) {
@@ -444,7 +642,12 @@ function renderIncidents(items) {
 }
 
 async function loadIncidents() {
-  state.incidents = await api("/api/incidents");
+  if (state.productionAvailable && !hasStaffAccess()) {
+    state.incidents = [];
+    $("#incidentGrid").innerHTML = `<p class="empty">Sign in to view production incidents.</p>`;
+    return;
+  }
+  state.incidents = state.productionAvailable ? await staffApi("/incidents") : await api("/api/incidents");
   renderIncidents(state.incidents);
 }
 
@@ -453,9 +656,9 @@ async function loadVisibleNotes(items) {
     const target = $(`[data-notes="${item.id}"]`);
     if (!target) return;
     try {
-      const notes = await api(`/api/incidents/${item.id}/notes`);
+      const notes = state.productionAvailable ? await staffApi(`/incidents/${item.id}/notes`) : await api(`/api/incidents/${item.id}/notes`);
       target.innerHTML = notes.slice(0, 3).map((note) => `
-        <p><strong>${escapeHtml(note.actor_label)}</strong>: ${escapeHtml(note.note)}</p>
+        <p><strong>${escapeHtml(note.actor_label || "responder")}</strong>: ${escapeHtml(note.note)}</p>
       `).join("") || `<p class="empty">No mediation notes yet.</p>`;
     } catch {
       target.innerHTML = `<p class="empty">Notes unavailable.</p>`;
@@ -472,10 +675,14 @@ function bindNoteForms() {
       event.preventDefault();
       const note = form.elements.note.value.trim();
       try {
-        await api(`/api/incidents/${form.dataset.note}/notes`, {
-          method: "POST",
-          body: { actor_label: state.role, note },
-        });
+        if (state.productionAvailable) {
+          await staffApi(`/incidents/${form.dataset.note}/notes`, { method: "POST", body: { note } });
+        } else {
+          await api(`/api/incidents/${form.dataset.note}/notes`, {
+            method: "POST",
+            body: { actor_label: state.role, note },
+          });
+        }
         form.reset();
         setDashboardResult("Mediation note added.");
         await loadIncidents();
@@ -500,7 +707,9 @@ function bindTimelineButtons() {
         return;
       }
       try {
-        const items = await api(`/api/incidents/${button.dataset.timeline}/timeline`);
+        const items = state.productionAvailable
+          ? await staffApi(`/incidents/${button.dataset.timeline}/timeline`)
+          : await api(`/api/incidents/${button.dataset.timeline}/timeline`);
         target.dataset.expanded = "true";
         target.innerHTML = items.map((item) => `
           <div>
@@ -524,20 +733,38 @@ async function uploadEvidence(event) {
   if (!file) return;
   try {
     validateEvidenceFile(file);
-    const content_base64 = await readAsDataUrl(file);
-    await api("/api/evidence", {
-      method: "POST",
-      body: {
-        filename: file.name,
-        mime_type: file.type,
-        content_base64,
-        sync_allowed: form.elements.sync_allowed.checked,
-      },
-    });
-    $("#evidenceResult").textContent = "Evidence uploaded, hashed, and stored locally.";
+    if (state.productionAvailable) {
+      const siteId = currentSiteId();
+      if (!siteId) throw new Error("Select a production site before adding evidence metadata.");
+      const sha256 = await fileSha256(file);
+      const record = await staffApi("/evidence/uploads", {
+        method: "POST",
+        body: {
+          site_id: siteId,
+          filename: file.name,
+          mime_type: file.type,
+          size_bytes: file.size,
+          sha256,
+          sync_allowed: form.elements.sync_allowed.checked,
+        },
+      });
+      $("#evidenceResult").textContent = `Evidence metadata created for ${record.object_key}.`;
+    } else {
+      const content_base64 = await readAsDataUrl(file);
+      await api("/api/evidence", {
+        method: "POST",
+        body: {
+          filename: file.name,
+          mime_type: file.type,
+          content_base64,
+          sync_allowed: form.elements.sync_allowed.checked,
+        },
+      });
+      $("#evidenceResult").textContent = "Evidence uploaded, hashed, and stored locally.";
+    }
     form.reset();
     await loadEvidence();
-    if (state.role === "coordinator") await loadSync().catch(() => {});
+    if (state.role === "coordinator" || hasRole("coordinator", "org_admin")) await loadSync().catch(() => {});
   } catch (error) {
     $("#evidenceResult").textContent = error.message;
   }
@@ -553,7 +780,11 @@ function validateEvidenceFile(file) {
 }
 
 async function loadEvidence() {
-  const items = await api("/api/evidence");
+  if (state.productionAvailable && !hasStaffAccess()) {
+    $("#evidenceList").innerHTML = `<p class="empty">Sign in to view production evidence metadata.</p>`;
+    return;
+  }
+  const items = state.productionAvailable ? await staffApi("/evidence") : await api("/api/evidence");
   $("#evidenceList").innerHTML = items.map((item) => `
     <article class="card">
       <h3>${escapeHtml(item.filename)}</h3>
@@ -561,7 +792,7 @@ async function loadEvidence() {
       <span class="badge">${item.sync_allowed ? "sync allowed" : "local only"}</span>
       <p><strong>SHA-256:</strong> ${escapeHtml(item.sha256.slice(0, 24))}...</p>
       <p>${item.linked_report_id ? `Linked report: ${escapeHtml(item.linked_report_id)}` : "Unlinked evidence record"}</p>
-      <p>${item.custody.map((event) => escapeHtml(event.action)).join("<br>")}</p>
+      <p>${state.productionAvailable ? `Object key: ${escapeHtml(item.object_key)}` : item.custody.map((event) => escapeHtml(event.action)).join("<br>")}</p>
     </article>
   `).join("") || `<p class="empty">No evidence records yet.</p>`;
 }
@@ -570,21 +801,30 @@ async function simulateSensor() {
   const queue_length = Math.floor(10 + Math.random() * 58);
   const flow_rate = Number((Math.random() * 9).toFixed(1));
   const uptime = flow_rate < 1.2 ? 0 : 1;
-  await api("/api/sensor-events", {
-    method: "POST",
-    body: {
-      resource_id: "water-point-north",
-      queue_length,
-      flow_rate,
-      uptime,
-      maintenance_note: uptime ? "" : "Pump inspection requested",
-    },
-  });
+  const body = {
+    site_id: currentSiteId(),
+    resource_id: "water-point-north",
+    queue_length,
+    flow_rate,
+    uptime,
+    maintenance_note: uptime ? "" : "Pump inspection requested",
+  };
+  if (state.productionAvailable) {
+    if (!body.site_id) throw new Error("Select a production site before simulating a resource event.");
+    await staffApi("/resources/events", { method: "POST", body });
+  } else {
+    delete body.site_id;
+    await api("/api/sensor-events", { method: "POST", body });
+  }
   await loadResources();
 }
 
 async function loadResources() {
-  const items = await api("/api/resources/status");
+  if (state.productionAvailable && !hasStaffAccess()) {
+    $("#resourceGrid").innerHTML = `<p class="empty">Sign in to view production resources.</p>`;
+    return;
+  }
+  const items = state.productionAvailable ? await staffApi("/resources/status") : await api("/api/resources/status");
   $("#resourceGrid").innerHTML = items.map((item) => `
     <article class="card">
       <h3>${escapeHtml(item.resource_id)}</h3>
@@ -600,7 +840,11 @@ async function loadResources() {
 async function submitRouteAlert(event) {
   event.preventDefault();
   try {
-    const alert = await api("/api/routes/alerts", { method: "POST", body: formData(event.currentTarget) });
+    const body = formData(event.currentTarget);
+    if (state.productionAvailable) body.site_id = currentSiteId();
+    const alert = state.productionAvailable
+      ? await staffApi("/routes/alerts", { method: "POST", body })
+      : await api("/api/routes/alerts", { method: "POST", body });
     $("#routeResult").textContent = `Route alert added for ${alert.route_label}.`;
     event.currentTarget.reset();
     await loadRoutes();
@@ -611,7 +855,12 @@ async function submitRouteAlert(event) {
 }
 
 async function loadRoutes() {
-  const status = await api("/api/routes/status");
+  if (state.productionAvailable && !hasStaffAccess()) {
+    $("#servicePointGrid").innerHTML = `<p class="empty">Sign in to view production routes.</p>`;
+    $("#routeAlertGrid").innerHTML = "";
+    return;
+  }
+  const status = state.productionAvailable ? await staffApi("/routes/status") : await api("/api/routes/status");
   $("#servicePointGrid").innerHTML = status.service_points.map((point) => `
     <article class="routeTile ${point.status}">
       <span>${escapeHtml(point.kind)}</span>
@@ -634,7 +883,11 @@ async function loadRoutes() {
 async function submitOpportunity(event) {
   event.preventDefault();
   try {
-    const opportunity = await api("/api/work/opportunities", { method: "POST", body: formData(event.currentTarget) });
+    const body = formData(event.currentTarget);
+    if (state.productionAvailable) body.site_id = currentSiteId();
+    const opportunity = state.productionAvailable
+      ? await staffApi("/work/opportunities", { method: "POST", body })
+      : await api("/api/work/opportunities", { method: "POST", body });
     $("#workResult").textContent = `Opportunity added: ${opportunity.title}.`;
     event.currentTarget.reset();
     await loadOpportunities();
@@ -645,7 +898,11 @@ async function submitOpportunity(event) {
 }
 
 async function loadOpportunities() {
-  const items = await api("/api/work/opportunities");
+  if (state.productionAvailable && !hasStaffAccess()) {
+    $("#workGrid").innerHTML = `<p class="empty">Sign in to view production opportunities.</p>`;
+    return;
+  }
+  const items = state.productionAvailable ? await staffApi("/work/opportunities") : await api("/api/work/opportunities");
   $("#workGrid").innerHTML = items.map((item) => `
     <article class="card">
       <h3>${escapeHtml(item.title)}</h3>
@@ -669,13 +926,23 @@ function prepareExploitationReport() {
 
 async function submitRumor(event) {
   event.preventDefault();
-  await api("/api/rumors", { method: "POST", body: formData(event.currentTarget) });
+  const body = formData(event.currentTarget);
+  if (state.productionAvailable) body.site_id = currentSiteId();
+  if (state.productionAvailable) {
+    await staffApi("/rumors", { method: "POST", body });
+  } else {
+    await api("/api/rumors", { method: "POST", body });
+  }
   event.currentTarget.reset();
   await loadRumors();
 }
 
 async function loadRumors() {
-  const clusters = await api("/api/rumors/clusters");
+  if (state.productionAvailable && !hasStaffAccess()) {
+    $("#rumorGrid").innerHTML = `<p class="empty">Sign in to view production rumor clusters.</p>`;
+    return;
+  }
+  const clusters = state.productionAvailable ? await staffApi("/rumors/clusters") : await api("/api/rumors/clusters");
   $("#rumorGrid").innerHTML = clusters.map((cluster) => `
     <article class="card">
       <h3>${escapeHtml(cluster.cluster_key)}</h3>
@@ -687,7 +954,14 @@ async function loadRumors() {
 }
 
 async function loadPrivacyAudit() {
-  const audit = await api("/api/privacy/audit");
+  if (state.productionAvailable && !hasStaffAccess()) {
+    $("#privacyCounts").innerHTML = `<p class="empty">Sign in to view the production privacy audit.</p>`;
+    $("#privacyLocal").innerHTML = "";
+    $("#privacySyncs").innerHTML = "";
+    $("#privacyNever").innerHTML = "";
+    return;
+  }
+  const audit = state.productionAvailable ? await staffApi("/privacy/audit") : await api("/api/privacy/audit");
   $("#privacyCounts").innerHTML = Object.entries(audit.counts).map(([key, value]) => `
     <div class="metricTile">
       <span>${escapeHtml(key.replaceAll("_", " "))}</span>
@@ -704,6 +978,30 @@ function policyList(items) {
 }
 
 async function loadSync() {
+  if (state.productionAvailable) {
+    if (!hasStaffAccess()) {
+      $("#syncPreview").innerHTML = `<p class="empty">Sign in to view production audit and sync records.</p>`;
+      return;
+    }
+    const [health, auditEvents] = await Promise.all([
+      v1("/health"),
+      hasRole("org_admin", "system_admin") ? staffApi("/audit-events") : Promise.resolve([]),
+    ]);
+    $("#healthHub").textContent = health.ok ? "Online" : "Check";
+    $("#healthDatabase").textContent = health.database || "Unknown";
+    $("#syncStatus").textContent = "Hub sync API ready";
+    $("#healthResource").textContent = "Production v1";
+    $("#healthLastSync").textContent = state.lastSyncAt ? new Date(state.lastSyncAt).toLocaleString() : "Not run";
+    $("#syncPreview").innerHTML = auditEvents.length ? auditEvents.map((item) => `
+      <article class="card syncItem">
+        <h3>${escapeHtml(item.action)}</h3>
+        <span class="badge">${escapeHtml(item.subject_type)}</span>
+        <span class="badge">${new Date(item.created_at).toLocaleString()}</span>
+        <p>${escapeHtml(item.detail || item.subject_id)}</p>
+      </article>
+    `).join("") : `<p class="empty">No production audit events available for this role.</p>`;
+    return;
+  }
   const [health, resources, preview] = await Promise.all([
     api("/api/health"),
     api("/api/resources/status"),
@@ -754,14 +1052,19 @@ function renderSyncPreview(items) {
 
 async function refreshAll() {
   await Promise.allSettled([loadIncidents(), loadEvidence(), loadResources(), loadRoutes(), loadOpportunities(), loadRumors(), loadPrivacyAudit(), checkHub()]);
-  if (state.role === "coordinator") await loadSync().catch(() => {});
+  if (state.role === "coordinator" || hasRole("coordinator", "org_admin", "system_admin")) await loadSync().catch(() => {});
 }
 
 async function checkHub() {
   try {
     if (state.offline) throw new Error("offline");
-    await api("/api/health");
-    $("#apiStatus").textContent = "Hub online";
+    if (state.productionAvailable) {
+      await v1("/health");
+      $("#apiStatus").textContent = "Production API online";
+    } else {
+      await api("/api/health");
+      $("#apiStatus").textContent = "Hub online";
+    }
   } catch {
     $("#apiStatus").textContent = "Offline demo mode";
   }
@@ -777,16 +1080,34 @@ function readAsDataUrl(file) {
   });
 }
 
+async function fileSha256(file) {
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 function applyRole() {
+  if (state.productionAvailable) {
+    if (hasRole("org_admin", "system_admin")) {
+      state.role = "coordinator";
+    } else if (hasRole("coordinator")) {
+      state.role = "coordinator";
+    } else if (hasRole("steward")) {
+      state.role = "steward";
+    } else {
+      state.role = "community";
+    }
+  }
   $("#roleSelect").value = state.role;
   $$("[data-role]").forEach((item) => {
     const required = item.dataset.role;
-    const visible = state.role === required || (required === "steward" && state.role === "coordinator");
+    const visible = state.productionAvailable
+      ? hasStaffAccess() && (required === "steward" || hasRole("coordinator", "org_admin", "system_admin"))
+      : state.role === required || (required === "steward" && state.role === "coordinator");
     item.hidden = !visible;
   });
   const activeTab = $(".tab.active");
   if (activeTab?.hidden) activateView("report");
-  if (state.role === "coordinator") loadSync().catch(() => {});
+  if (state.role === "coordinator" || hasRole("coordinator", "org_admin", "system_admin")) loadSync().catch(() => {});
 }
 
 function escapeHtml(value) {
@@ -811,9 +1132,18 @@ function bind() {
     checkHub();
   });
   $("#roleSelect").addEventListener("change", () => {
+    if (state.productionAvailable) return;
     state.role = $("#roleSelect").value;
     localStorage.setItem("peacepulse-role", state.role);
     applyRole();
+  });
+  $("#bootstrapForm").addEventListener("submit", bootstrapTenant);
+  $("#loginForm").addEventListener("submit", loginStaff);
+  $("#logoutStaff").addEventListener("click", logoutStaff);
+  $("#startMfa").addEventListener("click", startMfaEnrollment);
+  $("#mfaForm").addEventListener("submit", verifyMfaEnrollment);
+  $("#publicSiteSelect").addEventListener("change", () => {
+    saveSelectedSite($("#publicSiteSelect").value);
   });
   $("#reportForm").addEventListener("submit", submitReport);
   $("#flushQueue").addEventListener("click", flushQueue);
@@ -862,10 +1192,17 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
 }
 
-bind();
-applyRole();
-updateQueueCount();
-updateTextCount();
-renderPhrasebook();
-renderDemoLog();
-refreshAll();
+async function init() {
+  bind();
+  renderPublicSites();
+  renderAccessState();
+  await loadProductionContext();
+  applyRole();
+  updateQueueCount();
+  updateTextCount();
+  renderPhrasebook();
+  renderDemoLog();
+  refreshAll();
+}
+
+init();

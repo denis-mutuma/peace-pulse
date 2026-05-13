@@ -5,12 +5,18 @@ PeacePulse Hub is an offline-first community resilience prototype for fragile an
 ## Quick Start
 
 ```bash
-uv run python services/api/server.py
+uv run python -m services.api_prod.main
 ```
 
 Open `http://localhost:8080`.
 
-The app uses `uv` for Python environment management and only Python standard-library modules for the local demo. It creates a SQLite database under `data/peacepulse.db`.
+The production API uses FastAPI, SQLAlchemy, and SQLite in WAL mode for a low-cost pilot deployment. It creates a SQLite database under `data/peacepulse-prod.db` by default.
+
+For the legacy local demo server, run:
+
+```bash
+uv run python services/api/server.py
+```
 
 ## Docker
 
@@ -22,11 +28,25 @@ The container serves the API and static PWA on port `8080`. Runtime state is wri
 
 ## Configuration
 
-The API supports these optional environment variables:
+The production API supports these optional environment variables:
 
-- `PEACEPULSE_HOST`: bind host, default `0.0.0.0`.
-- `PEACEPULSE_PORT`: bind port, default `8080`.
-- `PEACEPULSE_DB_PATH`: SQLite database path, default `data/peacepulse.db`.
+- `PEACEPULSE_ENV`: runtime environment, default `development`.
+- `PEACEPULSE_DATABASE_URL`: SQLAlchemy database URL, default `sqlite:///data/peacepulse-prod.db`.
+- `PEACEPULSE_JWT_SECRET`: signing secret for staff access tokens. Change this before deployment.
+- `PEACEPULSE_BOOTSTRAP_TOKEN`: required in production for first-tenant bootstrap.
+- `PEACEPULSE_EVIDENCE_STORAGE_DIR`: local fallback evidence object directory.
+- `PEACEPULSE_S3_ENDPOINT_URL` and `PEACEPULSE_S3_BUCKET`: optional S3-compatible evidence object storage.
+
+Bootstrap the first production tenant after starting the API:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/admin/bootstrap \
+  -H 'content-type: application/json' \
+  -H "X-Bootstrap-Token: $PEACEPULSE_BOOTSTRAP_TOKEN" \
+  -d '{"organization_name":"Demo Org","site_name":"North Site","admin_email":"admin@example.org","admin_password":"REPLACE_WITH_LONG_PASSWORD","admin_name":"Admin"}'
+```
+
+The browser also exposes this bootstrap flow in the Production Access panel. After bootstrapping, sign in with the admin account, enroll MFA from the access panel, and verify a code from an authenticator app. Staff views use `/api/v1` with server-enforced roles; the legacy browser role selector is only used when running the old local demo server.
 
 Evidence uploads are capped at 2 MB and limited to image, audio, text, or PDF content. Synced evidence records include metadata and hashes only; encrypted local storage paths are not included in the sync preview.
 

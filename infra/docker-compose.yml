@@ -3,11 +3,13 @@ services:
     build:
       context: ..
       dockerfile: infra/python.Dockerfile
-    command: uv run python services/api/server.py
+    command: uv run python -m services.api_prod.main
     environment:
-      PEACEPULSE_HOST: 0.0.0.0
-      PEACEPULSE_PORT: 8080
-      PEACEPULSE_DB_PATH: /app/data/peacepulse.db
+      PEACEPULSE_ENV: production
+      PEACEPULSE_DATABASE_URL: sqlite:////app/data/peacepulse-prod.db
+      PEACEPULSE_JWT_SECRET: ${PEACEPULSE_JWT_SECRET:-change-this-secret-before-production}
+      PEACEPULSE_BOOTSTRAP_TOKEN: ${PEACEPULSE_BOOTSTRAP_TOKEN:-}
+      PEACEPULSE_EVIDENCE_STORAGE_DIR: /app/data/storage/evidence-prod
     ports:
       - "8080:8080"
     volumes:

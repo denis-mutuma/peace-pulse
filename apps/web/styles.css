@@ -87,6 +87,24 @@ button.secondary,
   margin: 1rem auto 3rem;
 }
 
+.accessPanel[hidden] {
+  display: none;
+}
+
+.accessGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.compactForm {
+  align-content: start;
+  padding: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f9faf8;
+}
+
 .tabs {
   display: flex;
   gap: 0.4rem;
@@ -527,6 +545,7 @@ textarea {
     justify-content: flex-start;
   }
 
+  .accessGrid,
   .form {
     grid-template-columns: 1fr;
   }
