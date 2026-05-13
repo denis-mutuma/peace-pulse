@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DB_PATH="${PEACEPULSE_DB_PATH:-/app/data/peacepulse-prod.db}"
+DATABASE_URL="${PEACEPULSE_DATABASE_URL:-sqlite:////app/data/peacepulse-prod.db}"
+if [[ "$DATABASE_URL" != sqlite:///* ]]; then
+  echo "Only sqlite PEACEPULSE_DATABASE_URL values can be backed up by this script." >&2
+  exit 1
+fi
+DB_PATH="${DATABASE_URL#sqlite:///}"
 BACKUP_DIR="${PEACEPULSE_BACKUP_DIR:-/app/data/backups}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 

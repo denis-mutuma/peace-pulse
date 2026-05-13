@@ -41,7 +41,7 @@ docker compose -f infra/docker-compose.yml up -d --build
 After deployment, verify the service from your machine:
 
 ```bash
-curl http://EC2_HOST:8080/api/health
+curl http://EC2_HOST:8080/api/v1/health
 ```
 
 On the EC2 instance, verify the running container and logs:
@@ -73,9 +73,9 @@ Example host cron entry:
 
 ## Runtime Data
 
-The Compose stack stores SQLite data under `/opt/peacepulse/app/data` through `PEACEPULSE_DB_PATH=/app/data/peacepulse.db`. Evidence files are stored under the same data tree and are not committed to git.
+The Compose stack stores SQLite data under `/opt/peacepulse/app/data` through `PEACEPULSE_DATABASE_URL=sqlite:////app/data/peacepulse-prod.db`. Evidence files are stored under the same data tree and are not committed to git.
 
-For a clean demo reset, stop the container and remove only the runtime data directory:
+For a clean runtime reset on a non-production demo instance, stop the container and remove only the runtime data directory:
 
 ```bash
 cd /opt/peacepulse/app

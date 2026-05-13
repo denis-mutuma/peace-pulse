@@ -1,6 +1,6 @@
 # PeacePulse Hub
 
-PeacePulse Hub is an offline-first community resilience prototype for fragile and displaced communities. It runs as a local edge hub and supports anonymous report intake, deterministic redaction, human-reviewed triage, evidence protection, resource monitoring, rumor triage, and low-bandwidth sync simulation.
+PeacePulse Hub is an offline-first community resilience prototype for fragile and displaced communities. It runs as a local edge hub and supports anonymous report intake, deterministic redaction, human-reviewed triage, evidence protection, resource monitoring, rumor triage, runbook-grounded Copilot assistance, and low-bandwidth sync simulation.
 
 ## Quick Start
 
@@ -12,19 +12,13 @@ Open `http://localhost:8080`.
 
 The production API uses FastAPI, SQLAlchemy, and SQLite in WAL mode for a low-cost pilot deployment. It creates a SQLite database under `data/peacepulse-prod.db` by default.
 
-For the legacy local demo server, run:
-
-```bash
-uv run python services/api/server.py
-```
-
 ## Docker
 
 ```bash
 docker compose -f infra/docker-compose.yml up --build
 ```
 
-The container serves the API and static PWA on port `8080`. Runtime state is written to `data/` by default, so local demo data survives container rebuilds unless that directory is removed.
+The container serves the API and static PWA on port `8080`. Runtime state is written to `data/` by default, so local runtime records survive container rebuilds unless that directory is removed.
 
 ## Configuration
 
@@ -46,7 +40,7 @@ curl -X POST http://localhost:8080/api/v1/admin/bootstrap \
   -d '{"organization_name":"Demo Org","site_name":"North Site","admin_email":"admin@example.org","admin_password":"REPLACE_WITH_LONG_PASSWORD","admin_name":"Admin"}'
 ```
 
-The browser also exposes this bootstrap flow in the Production Access panel. After bootstrapping, sign in with the admin account, enroll MFA from the access panel, and verify a code from an authenticator app. Staff views use `/api/v1` with server-enforced roles; the legacy browser role selector is only used when running the old local demo server.
+The browser also exposes this bootstrap flow in the Production Access panel. After bootstrapping, sign in with the admin account, enroll MFA from the access panel, and verify a code from an authenticator app. Staff views use `/api/v1` with server-enforced roles.
 
 Evidence uploads are capped at 2 MB and limited to image, audio, text, or PDF content. Synced evidence records include metadata and hashes only; encrypted local storage paths are not included in the sync preview.
 
@@ -62,53 +56,15 @@ The suite includes standard-library API tests plus headless browser smoke tests 
 
 1. Use a guided report tile to load a low-literacy starter report.
 2. Add a phone number or exact block to show the active privacy warning, then remove it.
-3. Attach an optional short audio note to show voice intake as linked evidence.
+3. Sign in as staff and attach an optional short audio note to show linked evidence metadata.
 4. Open the Demo tab and run the guided water-point scenario.
 5. Review the redacted incident in the responder dashboard.
 6. Check the evidence hash/custody record and resource anomaly.
 7. Review the related rumor cluster for steward notes.
 8. Toggle offline mode in the browser, submit another report, then go online and flush the queue.
-9. Switch to coordinator role, inspect the node health/sync preview, and run sync.
+9. Sign in with coordinator access, inspect the node health/sync preview, and run sync.
 
 See [Manual Test Checklist](docs/manual-test.md) for a fuller smoke test.
-
-## Demo Reset
-
-The Demo tab includes a reset action for rehearsals and presentations. It clears runtime records, removes stored evidence binaries, clears the browser-side scenario log, and reseeds the water-point scenario.
-
-Use reset when:
-
-- A judge or reviewer asks to see the flow from the beginning.
-- The browser offline queue contains old demo submissions.
-- Sync counts or incident cards are cluttered from prior rehearsals.
-- You want the dashboard to return to the same predictable seeded story.
-
-The reset is intentionally local to the prototype runtime. It does not alter source files, git history, deployment configuration, or application code.
-
-For scripted rehearsals, the same reset is available through the local API:
-
-```bash
-curl -X POST http://localhost:8080/api/demo/reset
-```
-
-The response includes the number of seeded reports, incidents, resource events, and rumor records. After calling it, refresh the browser so every tab reloads the seeded state.
-
-Reset safety notes:
-
-- Use it only for demo data, not for real submissions.
-- It removes local evidence binaries created during rehearsal.
-- It clears queued browser submissions from the current browser session.
-- It preserves the codebase and deployment settings.
-- It gives every presentation the same starting state.
-
-Recommended rehearsal order after reset:
-
-1. Select a guided intake tile and confirm the report form fills safely.
-2. Run the guided scenario.
-3. Add one mediation note.
-4. Open the privacy audit.
-5. Run coordinator sync.
-6. Confirm the sync preview is redacted.
 
 ## Guided Intake
 
@@ -116,30 +72,38 @@ The Report tab includes low-literacy guided tiles for the main concern types. Ea
 
 The browser also checks the report text for likely sensitive details before submission. Phone numbers, email addresses, ID-like values, exact block/unit locations, and titled names trigger a warning panel. The warning does not block reporting; it gives the community member a chance to remove identifying details while the backend still performs deterministic redaction during triage.
 
-Reports can include an optional audio note. Voice files are handled through the evidence locker: the hub validates the file type and size, hashes the bytes, stores encrypted local evidence, links the metadata to the report timeline, and syncs metadata only when the submitter allows it. Offline browser queueing stores text reports only, so voice notes should be added while the hub is reachable.
+Reports can include optional audio-note metadata when staff are signed in. The browser validates the file type and size, hashes the bytes, creates a linked evidence metadata record, and syncs metadata only when allowed. Offline browser queueing stores text reports only, so voice notes should be added while the hub is reachable and staff access is active.
 
 Voice-note boundaries:
 
 - Keep recordings short and focused on the concern.
 - Avoid speaking names, phone numbers, or exact shelters.
-- Treat voice bytes as local evidence, not coordinator sync content.
+- Treat voice bytes as local-only material, not coordinator sync content.
 
 ## Services
 
 - `apps/web`: static offline-first PWA.
-- `services/api`: local edge API, SQLite schema, redaction, triage, evidence, resources, rumors, and sync queue.
+- `services/api_prod`: production FastAPI app, SQLAlchemy schema, auth, redaction, triage, evidence, resources, routes, rumors, Copilot, and sync preview.
 - `infra`: Docker Compose and EC2 deployment notes.
+
+## Copilot
+
+PeacePulse Copilot adds a local, runbook-grounded assistant for staff review. It can investigate an incident, return conservative hypotheses, recommend next actions, show an agent trace, and cite the local runbooks used for grounding.
+
+Use `GET /api/v1/copilot/runbooks` to list seeded and organization runbooks, `POST /api/v1/copilot/incidents/{incident_id}/investigate` to generate an investigation packet, and `/api/v1/copilot/sessions` plus `/api/v1/copilot/sessions/{session_id}/messages` for persisted staff chat.
+
+Copilot uses redacted incident summaries and runbook text only. Chat transcripts remain local to the hub, do not enter coordinator sync preview, and should not be used to collect names, exact shelters, phone numbers, or raw evidence.
 
 ## SafeRoute API
 
-SafeRoute stores rough route and service-point status only. Use `GET /api/routes/status` to list default service points and current alerts, and `POST /api/routes/alerts` to add a redacted route alert for caution, blocked, or service-update conditions.
+SafeRoute stores rough route and service-point status only. Use `GET /api/v1/routes/status` to list default service points and current alerts, and `POST /api/v1/routes/alerts` to add a redacted route alert for caution, blocked, or service-update conditions.
 
 Route alerts are intentionally coarse. They sync as summaries for coordinator review and do not store GPS traces, person identities, or exact movement history.
 Use the main report flow for detailed unsafe-route narratives that need responder triage.
 
 ## FairWork API
 
-FairWork stores local opportunity summaries without worker profiles or employer identity claims. Use `GET /api/work/opportunities` to list opportunities and `POST /api/work/opportunities` to add a steward-reviewed listing.
+FairWork stores local opportunity summaries without worker profiles or employer identity claims. Use `GET /api/v1/work/opportunities` to list opportunities and `POST /api/v1/work/opportunities` to add a steward-reviewed listing.
 
 Only steward-checked opportunity summaries sync. Exploitation concerns should use the existing anonymous report flow with the `work_exploitation` concern type.
 This keeps opportunity coordination separate from identity-based hiring or payroll systems.
@@ -173,7 +137,7 @@ Quick FairWork checks:
 - Safety notes are redacted before display and sync preview.
 - Exploitation reports return to anonymous intake.
 - No person profile is created during the flow.
-- Reset demo data restores seeded opportunities.
+- Clearing demo state removes only browser-local demo logs and queued reports.
 
 Presentation prompts:
 
@@ -196,6 +160,7 @@ Demo talking points:
 
 - Reports are anonymous and dashboard text is redacted.
 - Evidence files remain encrypted in local edge storage.
+- Copilot cites local runbooks and works from redacted incident context.
 - Sync preview shows summaries and metadata, not raw evidence bytes.
 - The app does not create accounts, track movement, or infer guilt.
 - The privacy audit should be shown before any discussion of deployment.
