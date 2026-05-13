@@ -1200,16 +1200,17 @@ async function loadSync() {
     $("#syncPreview").innerHTML = `<p class="empty">Sign in to view production sync records.</p>`;
     return;
   }
-  const [health, preview] = await Promise.all([
+  const [health, preview, history] = await Promise.all([
     v1("/health"),
     staffApi("/sync/preview"),
+    staffApi("/sync/history"),
   ]);
   $("#healthHub").textContent = health.ok ? "Online" : "Check";
   $("#healthDatabase").textContent = health.database || "Unknown";
-  $("#syncStatus").textContent = "Hub sync API ready";
+  $("#syncStatus").textContent = preview.length ? `${preview.length} pending` : "No pending records";
   $("#healthResource").textContent = "Production v1";
   $("#healthLastSync").textContent = state.lastSyncAt ? new Date(state.lastSyncAt).toLocaleString() : "Not run";
-  renderSyncPreview(preview);
+  renderSyncPreview(preview.length ? preview : history, preview.length ? "Pending sync records" : "Recent sync history");
 }
 
 async function runSync() {
@@ -1221,17 +1222,18 @@ async function runSync() {
   await loadSync();
 }
 
-function renderSyncPreview(items) {
+function renderSyncPreview(items, label = "Sync records") {
   if (!items.length) {
     $("#syncPreview").innerHTML = `<p class="empty">No sync records yet.</p>`;
     return;
   }
-  $("#syncPreview").innerHTML = items.map((item) => `
+  $("#syncPreview").innerHTML = `<p class="sectionSub">${escapeHtml(label)}</p>` + items.map((item) => `
     <article class="card syncItem">
       <div>
         <h3>${escapeHtml(item.item_type.replaceAll("_", " "))}</h3>
         <span class="badge">${escapeHtml(item.status)}</span>
         <span class="badge">${new Date(item.created_at).toLocaleString()}</span>
+        ${item.synced_at ? `<span class="badge ok">Synced ${new Date(item.synced_at).toLocaleString()}</span>` : ""}
       </div>
       <dl>
         ${Object.entries(item.summary).map(([key, value]) => `

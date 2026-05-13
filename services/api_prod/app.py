@@ -556,6 +556,19 @@ async def sync_preview(
     return services.sync_preview(db, principal.primary_org_id, site_ids)
 
 
+@app.get("/api/v1/sync/history")
+async def sync_history(
+    db: Annotated[Session, Depends(get_db)],
+    principal: Annotated[Principal, Depends(require_role("coordinator", "org_admin", "system_admin"))],
+    site_id: str | None = None,
+) -> list[dict[str, object]]:
+    if site_id:
+        site = require_site_access(db, principal, site_id)
+        return services.sync_history(db, site.organization_id, {site.id})
+    site_ids = None if {"org_admin", "system_admin"}.intersection(principal.roles) else principal.site_ids
+    return services.sync_history(db, principal.primary_org_id, site_ids)
+
+
 @app.post("/api/v1/sync/run")
 async def run_sync(
     db: Annotated[Session, Depends(get_db)],

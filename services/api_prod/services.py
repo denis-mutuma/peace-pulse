@@ -421,12 +421,13 @@ def list_opportunities(db: Session, org_id: str, site_ids: set[str] | None = Non
     return list(db.scalars(query.order_by(models.Opportunity.created_at.desc(), models.Opportunity.id.desc())))
 
 
-def _sync_item(item_type: str, item_id: str, created_at: Any, payload: dict[str, Any]) -> dict[str, Any]:
+def _sync_item(item_type: str, item_id: str, created_at: Any, payload: dict[str, Any], site_id: str | None = None) -> dict[str, Any]:
     return {
         "id": f"{item_type}_{item_id}",
         "created_at": created_at,
         "item_type": item_type,
         "item_id": item_id,
+        "site_id": site_id,
         "status": "pending",
         "synced_at": None,
         "payload_keys": sorted(payload.keys()),
@@ -434,15 +435,8 @@ def _sync_item(item_type: str, item_id: str, created_at: Any, payload: dict[str,
     }
 
 
-def sync_preview(db: Session, org_id: str, site_ids: set[str] | None = None, limit: int = 20) -> list[dict[str, Any]]:
+def _sync_candidates(db: Session, org_id: str, site_ids: set[str] | None = None, limit: int = 100) -> list[dict[str, Any]]:
     limit = max(1, min(int(limit or 20), 100))
-
-    def scope(query):
-        query = query.where(models.AuditEvent.organization_id == org_id)
-        if site_ids:
-            query = query.where(models.AuditEvent.site_id.in_(site_ids))
-        return query
-
     previews: list[dict[str, Any]] = []
 
     incident_query = select(models.Incident).where(models.Incident.organization_id == org_id)
@@ -460,6 +454,7 @@ def sync_preview(db: Session, org_id: str, site_ids: set[str] | None = None, lim
                     "cluster_key": incident.cluster_key,
                     "redacted_text": incident.redacted_text,
                 },
+                incident.site_id,
             )
         )
 
@@ -477,6 +472,7 @@ def sync_preview(db: Session, org_id: str, site_ids: set[str] | None = None, lim
                     "actor_label": note.actor_user_id or "steward",
                     "note": note.note,
                 },
+                note.site_id,
             )
         )
 
@@ -496,6 +492,7 @@ def sync_preview(db: Session, org_id: str, site_ids: set[str] | None = None, lim
                     "size_bytes": item.size_bytes,
                     "object_key": item.object_key,
                 },
+                item.site_id,
             )
         )
 
@@ -514,6 +511,7 @@ def sync_preview(db: Session, org_id: str, site_ids: set[str] | None = None, lim
                     "queue_length": item.queue_length,
                     "uptime": item.uptime,
                 },
+                item.site_id,
             )
         )
 
@@ -532,6 +530,7 @@ def sync_preview(db: Session, org_id: str, site_ids: set[str] | None = None, lim
                     "cluster_key": item.cluster_key,
                     "redacted_text": item.redacted_text,
                 },
+                item.site_id,
             )
         )
 
@@ -551,6 +550,7 @@ def sync_preview(db: Session, org_id: str, site_ids: set[str] | None = None, lim
                     "status": item.status,
                     "note": item.note,
                 },
+                item.site_id,
             )
         )
 
@@ -569,20 +569,119 @@ def sync_preview(db: Session, org_id: str, site_ids: set[str] | None = None, lim
                     "rough_location": item.rough_location,
                     "verification_status": item.verification_status,
                 },
+                item.site_id,
             )
         )
 
     return sorted(previews, key=lambda item: item["created_at"], reverse=True)[:limit]
 
 
+def sync_preview(db: Session, org_id: str, site_ids: set[str] | None = None, limit: int = 20) -> list[dict[str, Any]]:
+    _ensure_sync_records(db, org_id, site_ids)
+    query = select(models.SyncRecord).where(models.SyncRecord.organization_id == org_id, models.SyncRecord.status.in_(("pending", "failed")))
+    if site_ids:
+        query = query.where((models.SyncRecord.site_id.is_(None)) | (models.SyncRecord.site_id.in_(site_ids)))
+    rows = db.scalars(query.order_by(models.SyncRecord.created_at.desc()).limit(max(1, min(limit, 100))))
+    return [_sync_record_out(row) for row in rows]
+
+
+def sync_history(db: Session, org_id: str, site_ids: set[str] | None = None, limit: int = 30) -> list[dict[str, Any]]:
+    _ensure_sync_records(db, org_id, site_ids)
+    query = select(models.SyncRecord).where(models.SyncRecord.organization_id == org_id)
+    if site_ids:
+        query = query.where((models.SyncRecord.site_id.is_(None)) | (models.SyncRecord.site_id.in_(site_ids)))
+    rows = db.scalars(query.order_by(models.SyncRecord.updated_at.desc()).limit(max(1, min(limit, 100))))
+    return [_sync_record_out(row) for row in rows]
+
+
 def sync_status(db: Session, org_id: str, site_ids: set[str] | None = None) -> dict[str, int]:
-    preview = sync_preview(db, org_id, site_ids)
-    return {"pending": len(preview), "synced": 0}
+    _ensure_sync_records(db, org_id, site_ids)
+    query = select(models.SyncRecord.status, func.count(models.SyncRecord.id)).where(models.SyncRecord.organization_id == org_id)
+    if site_ids:
+        query = query.where((models.SyncRecord.site_id.is_(None)) | (models.SyncRecord.site_id.in_(site_ids)))
+    counts = {status: count for status, count in db.execute(query.group_by(models.SyncRecord.status)).all()}
+    return {"pending": counts.get("pending", 0), "synced": counts.get("synced", 0), "failed": counts.get("failed", 0)}
 
 
 def run_sync(db: Session, org_id: str, site_ids: set[str] | None = None) -> dict[str, Any]:
-    preview = sync_preview(db, org_id, site_ids)
-    return {"synced": len(preview), **sync_status(db, org_id, site_ids)}
+    pending = sync_preview(db, org_id, site_ids)
+    now = now_utc()
+    synced = 0
+    for item in pending:
+        record = db.get(models.SyncRecord, item["id"])
+        if not record:
+            continue
+        serialized = json.dumps(item["summary"]).lower()
+        if _sync_payload_has_local_only_fields(item["summary"]) or _sync_payload_looks_unredacted(serialized):
+            record.status = "failed"
+            record.failure_reason = "payload failed privacy guard"
+            continue
+        record.status = "synced"
+        record.synced_at = now
+        record.failure_reason = ""
+        synced += 1
+    audit(db, org_id, None, None, "sync.run", "sync_record", org_id, f"{synced} pending records marked synced.")
+    db.commit()
+    return {"synced": synced, **sync_status(db, org_id, site_ids)}
+
+
+def _ensure_sync_records(db: Session, org_id: str, site_ids: set[str] | None = None) -> None:
+    existing = {
+        (row.item_type, row.item_id): row
+        for row in db.scalars(select(models.SyncRecord).where(models.SyncRecord.organization_id == org_id))
+    }
+    changed = False
+    for item in _sync_candidates(db, org_id, site_ids):
+        key = (item["item_type"], item["item_id"])
+        payload_json = json.dumps(item["summary"], sort_keys=True, default=str)
+        payload_keys_json = json.dumps(item["payload_keys"])
+        record = existing.get(key)
+        if record:
+            if record.status != "synced" and (record.payload_json != payload_json or record.payload_keys_json != payload_keys_json):
+                record.payload_json = payload_json
+                record.payload_keys_json = payload_keys_json
+                record.status = "pending"
+                record.failure_reason = ""
+                changed = True
+            continue
+        db.add(
+            models.SyncRecord(
+                id=item["id"],
+                organization_id=org_id,
+                site_id=item["site_id"],
+                item_type=item["item_type"],
+                item_id=item["item_id"],
+                payload_json=payload_json,
+                payload_keys_json=payload_keys_json,
+            )
+        )
+        changed = True
+    if changed:
+        db.commit()
+
+
+def _sync_record_out(record: models.SyncRecord) -> dict[str, Any]:
+    return {
+        "id": record.id,
+        "created_at": record.created_at,
+        "updated_at": record.updated_at,
+        "item_type": record.item_type,
+        "item_id": record.item_id,
+        "status": record.status,
+        "synced_at": record.synced_at,
+        "failure_reason": record.failure_reason,
+        "payload_keys": json.loads(record.payload_keys_json),
+        "summary": json.loads(record.payload_json),
+    }
+
+
+def _sync_payload_has_local_only_fields(payload: dict[str, Any]) -> bool:
+    return "raw_text" in payload or "encrypted_path" in payload or "content_base64" in payload
+
+
+def _sync_payload_looks_unredacted(serialized: str) -> bool:
+    return any(marker in serialized for marker in ["+254 700", "@example", "block c-12"])
+
 
 
 def incident_timeline(db: Session, incident: models.Incident) -> list[dict[str, Any]]:
@@ -622,11 +721,11 @@ def accept_sync_batch(db: Session, hub: models.HubDevice, payload: SyncBatchIn) 
     rejected = 0
     for item in payload.items:
         serialized = json.dumps(item.payload).lower()
-        if "raw_text" in item.payload or "encrypted_path" in item.payload or "content_base64" in item.payload:
+        if _sync_payload_has_local_only_fields(item.payload):
             rejected += 1
             results.append({"item_id": item.item_id, "status": "rejected", "reason": "payload contains local-only fields"})
             continue
-        if any(marker in serialized for marker in ["+254 700", "@example", "block c-12"]):
+        if _sync_payload_looks_unredacted(serialized):
             rejected += 1
             results.append({"item_id": item.item_id, "status": "rejected", "reason": "payload appears unredacted"})
             continue

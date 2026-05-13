@@ -236,6 +236,22 @@ class SyncBatch(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(30), default="accepted", nullable=False)
 
 
+class SyncRecord(TimestampMixin, Base):
+    __tablename__ = "sync_records"
+    __table_args__ = (UniqueConstraint("organization_id", "item_type", "item_id", name="uq_sync_record_item"),)
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), nullable=False, index=True)
+    site_id: Mapped[str | None] = mapped_column(ForeignKey("sites.id"), nullable=True, index=True)
+    item_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    item_id: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(30), default="pending", nullable=False, index=True)
+    payload_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    payload_keys_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failure_reason: Mapped[str] = mapped_column(String(240), default="", nullable=False)
+
+
 class AuditEvent(TimestampMixin, Base):
     __tablename__ = "audit_events"
 

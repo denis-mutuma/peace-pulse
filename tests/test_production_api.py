@@ -565,6 +565,37 @@ class ProductionApiTests(unittest.TestCase):
         self.assertEqual(result["accepted"], 1)
         self.assertEqual(result["rejected"], 1)
 
+    def test_sync_run_marks_pending_records_synced_and_keeps_history(self):
+        boot = self.bootstrap()
+        login = self.client.post(
+            "/api/v1/auth/login",
+            json={"email": "admin@example.org", "password": "change-this-password"},
+        )
+        headers = {"authorization": f"Bearer {login.json()['access_token']}"}
+        self.client.post(
+            f"/api/v1/public/sites/{boot['site_id']}/reports",
+            json={"rough_location": "North water point", "category_hint": "resource", "text": "Families are turned away after long water queues."},
+        )
+
+        preview = self.client.get("/api/v1/sync/preview", headers=headers)
+        self.assertEqual(preview.status_code, 200, preview.text)
+        self.assertTrue(preview.json())
+        self.assertTrue(all(item["status"] == "pending" for item in preview.json()))
+
+        result = self.client.post("/api/v1/sync/run", headers=headers, json={})
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertGreaterEqual(result.json()["synced"], 1)
+        self.assertEqual(result.json()["pending"], 0)
+
+        after = self.client.get("/api/v1/sync/preview", headers=headers)
+        self.assertEqual(after.status_code, 200, after.text)
+        self.assertEqual(after.json(), [])
+
+        history = self.client.get("/api/v1/sync/history", headers=headers)
+        self.assertEqual(history.status_code, 200, history.text)
+        self.assertTrue(history.json())
+        self.assertTrue(any(item["status"] == "synced" and item["synced_at"] for item in history.json()))
+
 
 if __name__ == "__main__":
     unittest.main()
