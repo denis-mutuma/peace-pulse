@@ -3,454 +3,544 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#153d36" />
+    <meta name="theme-color" content="#12312f" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="stylesheet" href="/styles.css" />
     <title>PeacePulse Hub</title>
   </head>
   <body>
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">Local edge hub</p>
-        <h1>PeacePulse Hub</h1>
-      </div>
-      <div class="connection">
-        <span id="apiStatus">Checking hub...</span>
-        <select id="roleSelect" aria-label="Role">
-          <option value="community">Community</option>
-          <option value="steward">Steward</option>
-          <option value="coordinator">Coordinator</option>
-        </select>
-        <button id="offlineToggle" type="button">Go offline</button>
-      </div>
-    </header>
+    <div class="appShell docsShell">
+      <aside class="sidebar" aria-label="PeacePulse navigation">
+        <div class="brandBlock">
+          <div class="brandMark" aria-hidden="true">P</div>
+          <div>
+            <h1>PeacePulse</h1>
+            <p>Production hub</p>
+          </div>
+        </div>
+        <nav class="tabs" aria-label="Primary views">
+          <p class="navLabel">Operations</p>
+          <button class="tab active" data-view="dashboard" data-role="steward">Incidents</button>
+          <button class="tab" data-view="resources" data-role="steward">Resources</button>
+          <button class="tab" data-view="routes">Routes</button>
+          <p class="navLabel">Intake</p>
+          <button class="tab" data-view="report">Report</button>
+          <button class="tab" data-view="evidence" data-role="steward">Evidence</button>
+          <button class="tab" data-view="work">FairWork</button>
+          <p class="navLabel">Intelligence</p>
+          <button class="tab" data-view="copilot" data-role="steward">Copilot</button>
+          <button class="tab" data-view="rumors" data-role="steward">Rumors</button>
+          <button class="tab" data-view="demo">Demo</button>
+          <p class="navLabel">System</p>
+          <button class="tab" data-view="privacy" data-role="steward">Privacy</button>
+          <button class="tab" data-view="sync" data-role="coordinator">Sync</button>
+          <button class="tab" data-view="access">Access</button>
+        </nav>
+      </aside>
 
-    <main class="layout">
-      <nav class="tabs" aria-label="Primary views">
-        <button class="tab active" data-view="report">Report</button>
-        <button class="tab" data-view="demo">Demo</button>
-        <button class="tab" data-view="dashboard" data-role="steward">Dashboard</button>
-        <button class="tab" data-view="evidence" data-role="steward">Evidence</button>
-        <button class="tab" data-view="resources" data-role="steward">Resources</button>
-        <button class="tab" data-view="rumors" data-role="steward">Rumors</button>
-        <button class="tab" data-view="privacy" data-role="steward">Privacy</button>
-        <button class="tab" data-view="sync" data-role="coordinator">Sync</button>
-        <button class="tab" data-view="routes">SafeRoute</button>
-        <button class="tab" data-view="work">FairWork</button>
-      </nav>
+      <div class="workspace">
+        <header class="topbar">
+          <div>
+            <h2 id="viewTitle">Incidents</h2>
+            <p class="topbarSub">Production workflows, privacy-first intake, and hub sync</p>
+          </div>
+          <div class="connection">
+            <label class="searchBox" aria-label="Search workspace">
+              <span>Search</span>
+              <input type="search" placeholder="Find reports, routes, sync..." />
+            </label>
+            <span id="apiStatus" class="statusPill">Checking hub...</span>
+            <button id="offlineToggle" type="button" class="secondary">Go offline</button>
+          </div>
+        </header>
 
-      <section id="accessPanel" class="accessPanel">
-        <div class="panel">
-          <div class="sectionHeader">
-            <h2>Production Access</h2>
-            <div class="actions">
-              <button id="logoutStaff" type="button" class="secondary" hidden>Sign out</button>
+        <main class="layout">
+          <section id="dashboard" class="view active">
+            <div class="pageHeader">
+              <div>
+                <h2>Incidents</h2>
+                <p>Monitor incoming reports, triage decisions, and operational pressure.</p>
+              </div>
+              <button id="refreshDashboard" type="button">Refresh</button>
             </div>
-          </div>
-          <div id="sessionSummary" class="result" role="status">Checking production API...</div>
-          <div class="accessGrid">
-            <form id="bootstrapForm" class="form compactForm">
-              <label class="wide">Bootstrap token
-                <input name="bootstrap_token" type="password" autocomplete="off" />
+            <div class="healthGrid" id="dashboardMetrics">
+              <div class="metricTile"><span>Open incidents</span><strong>Loading</strong></div>
+              <div class="metricTile"><span>High severity</span><strong>Loading</strong></div>
+              <div class="metricTile"><span>Resource anomalies</span><strong>Loading</strong></div>
+              <div class="metricTile"><span>Queued reports</span><strong>Loading</strong></div>
+            </div>
+            <div class="toolbar filters" aria-label="Incident filters">
+              <label>Status
+                <select id="statusFilter">
+                  <option value="">Any status</option>
+                  <option value="new">New</option>
+                  <option value="assigned">Assigned</option>
+                  <option value="in_progress">In progress</option>
+                  <option value="resolved">Resolved</option>
+                </select>
               </label>
-              <label>Organization
-                <input name="organization_name" value="Demo Org" required />
+              <label>Category
+                <select id="categoryFilter">
+                  <option value="">Any category</option>
+                  <option value="resource">Resource dispute</option>
+                  <option value="threat">Threat or intimidation</option>
+                  <option value="corruption">Corruption or abuse</option>
+                  <option value="service_denial">Service denial</option>
+                  <option value="rumor">Harmful rumor</option>
+                  <option value="unsafe_route">Unsafe route</option>
+                  <option value="work_exploitation">Work exploitation</option>
+                  <option value="other">Other</option>
+                </select>
               </label>
-              <label>Site
-                <input name="site_name" value="North Site" required />
+              <label>Minimum severity
+                <select id="severityFilter">
+                  <option value="1">1+</option>
+                  <option value="2">2+</option>
+                  <option value="3">3+</option>
+                  <option value="4">4+</option>
+                  <option value="5">5</option>
+                </select>
               </label>
-              <label>Rough location
-                <input name="site_rough_location" value="North zone" />
-              </label>
-              <label>Admin email
-                <input name="admin_email" type="email" autocomplete="username" required />
-              </label>
-              <label>Admin password
-                <input name="admin_password" type="password" autocomplete="new-password" minlength="12" required />
-              </label>
-              <label>Admin name
-                <input name="admin_name" value="Admin" />
-              </label>
-              <button type="submit">Bootstrap tenant</button>
-            </form>
-            <form id="loginForm" class="form compactForm">
-              <label>Email
-                <input name="email" type="email" autocomplete="username" required />
-              </label>
-              <label>Password
-                <input name="password" type="password" autocomplete="current-password" required />
-              </label>
-              <label>MFA code
-                <input name="mfa_code" inputmode="numeric" autocomplete="one-time-code" />
-              </label>
-              <button type="submit">Sign in</button>
-            </form>
-            <form id="mfaForm" class="form compactForm" hidden>
-              <label class="wide">Authenticator secret
-                <input id="mfaSecret" readonly />
-              </label>
-              <label>MFA code
-                <input name="code" inputmode="numeric" autocomplete="one-time-code" required />
-              </label>
-              <button id="startMfa" type="button" class="secondary">Start MFA</button>
-              <button type="submit">Verify MFA</button>
-            </form>
-          </div>
-        </div>
-      </section>
+            </div>
+            <div id="dashboardResult" class="result" role="status"></div>
+            <div id="incidentGrid" class="incidentList"></div>
+          </section>
 
-      <section id="report" class="view active">
-        <div class="panel">
-          <h2>Anonymous Report</h2>
-          <div class="guidedIntake" aria-label="Guided concern choices">
-            <button type="button" data-guided-report="resource">
-              <span>Water</span>
-              Resource dispute
-            </button>
-            <button type="button" data-guided-report="threat">
-              <span>Alert</span>
-              Threat or intimidation
-            </button>
-            <button type="button" data-guided-report="corruption">
-              <span>Aid</span>
-              Corruption or abuse
-            </button>
-            <button type="button" data-guided-report="rumor">
-              <span>Talk</span>
-              Harmful rumor
-            </button>
-            <button type="button" data-guided-report="unsafe_route">
-              <span>Path</span>
-              Unsafe route
-            </button>
-            <button type="button" data-guided-report="work_exploitation">
-              <span>Work</span>
-              Work exploitation
-            </button>
-          </div>
-          <form id="reportForm" class="form">
-            <label>Language
-              <select name="language" id="reportLanguage">
-                <option value="en">English</option>
-                <option value="sw">Swahili</option>
-                <option value="fr">French</option>
-                <option value="ar">Arabic</option>
-              </select>
-            </label>
-            <label>Rough location
-              <input name="rough_location" value="North water point" />
-            </label>
-            <label>Public site
-              <select id="publicSiteSelect" aria-label="Public site"></select>
-            </label>
-            <label>Concern type
-              <select name="category_hint">
-                <option value="resource">Resource dispute</option>
-                <option value="threat">Threat or intimidation</option>
-                <option value="corruption">Corruption or abuse</option>
-                <option value="rumor">Harmful rumor</option>
-                <option value="unsafe_route">Unsafe route</option>
-                <option value="work_exploitation">Work exploitation</option>
-              </select>
-            </label>
-            <label class="wide">What happened?
-              <textarea name="text" rows="5" minlength="8" maxlength="2000" required>There is tension at the main water point because some families are being turned away.</textarea>
-            </label>
-            <label class="wide">Optional voice note
-              <input name="voice_note" type="file" accept="audio/*" />
-            </label>
-            <label class="check wide">
-              <input type="checkbox" name="voice_sync_allowed" />
-              Allow voice-note metadata to sync after local encryption
-            </label>
-            <p id="textCount" class="counter wide">0 / 2000 characters</p>
-            <p class="notice wide">Avoid names, exact homes, phone numbers, or details that could expose someone.</p>
-            <div id="riskWarning" class="riskWarning wide" hidden role="status"></div>
-            <div class="phrasebook wide" id="phrasebook"></div>
-            <button type="submit">Submit report</button>
-          </form>
-        </div>
-        <div class="panel">
-          <h2>Offline Queue</h2>
-          <p id="queueCount" class="metric">0 pending browser items</p>
-          <button id="flushQueue" type="button">Flush queue</button>
-          <div id="queueList" class="queueList"></div>
-          <div id="reportResult" class="result"></div>
-        </div>
-      </section>
+          <section id="report" class="view">
+            <div class="twoColumn">
+              <div class="panel">
+                <div class="sectionHeader flush">
+                  <div>
+                    <h2>Submit Report</h2>
+                    <p class="sectionSub">Anonymous intake for community signals.</p>
+                  </div>
+                </div>
+                <div class="guidedIntake" aria-label="Guided concern choices">
+                  <button type="button" data-guided-report="resource"><span>Water</span>Resource dispute</button>
+                  <button type="button" data-guided-report="threat"><span>Alert</span>Threat or intimidation</button>
+                  <button type="button" data-guided-report="corruption"><span>Aid</span>Corruption or abuse</button>
+                  <button type="button" data-guided-report="rumor"><span>Talk</span>Harmful rumor</button>
+                  <button type="button" data-guided-report="unsafe_route"><span>Path</span>Unsafe route</button>
+                  <button type="button" data-guided-report="work_exploitation"><span>Work</span>Work exploitation</button>
+                </div>
+                <form id="reportForm" class="form">
+                  <label>Language
+                    <select name="language" id="reportLanguage">
+                      <option value="en">English</option>
+                      <option value="sw">Swahili</option>
+                      <option value="fr">French</option>
+                      <option value="ar">Arabic</option>
+                    </select>
+                  </label>
+                  <label>Public site
+                    <select id="publicSiteSelect" aria-label="Public site"></select>
+                  </label>
+                  <label>Rough location
+                    <input name="rough_location" value="North water point" />
+                  </label>
+                  <label>Concern type
+                    <select name="category_hint">
+                      <option value="resource">Resource dispute</option>
+                      <option value="threat">Threat or intimidation</option>
+                      <option value="corruption">Corruption or abuse</option>
+                      <option value="rumor">Harmful rumor</option>
+                      <option value="unsafe_route">Unsafe route</option>
+                      <option value="work_exploitation">Work exploitation</option>
+                    </select>
+                  </label>
+                  <label class="wide">What happened?
+                    <textarea name="text" rows="6" minlength="8" maxlength="2000" required>There is tension at the main water point because some families are being turned away.</textarea>
+                  </label>
+                  <label class="wide">Optional voice note
+                    <input name="voice_note" type="file" accept="audio/*" />
+                  </label>
+                <label class="check wide">
+                  <input type="checkbox" name="voice_sync_allowed" />
+                    Allow linked voice-note metadata to sync
+                </label>
+                  <p id="textCount" class="counter wide">0 / 2000 characters</p>
+                  <p class="notice wide">Avoid names, exact homes, phone numbers, or details that could expose someone.</p>
+                  <div id="riskWarning" class="riskWarning wide" hidden role="status"></div>
+                  <div class="phrasebook wide" id="phrasebook"></div>
+                  <button type="submit">Submit report</button>
+                </form>
+              </div>
+              <aside class="panel sidePanel">
+                <h2>Offline Queue</h2>
+                <p id="queueCount" class="metric">0 pending browser items</p>
+                <button id="flushQueue" type="button">Flush queue</button>
+                <div id="queueList" class="queueList"></div>
+                <div id="reportResult" class="result"></div>
+              </aside>
+            </div>
+          </section>
 
-      <section id="demo" class="view">
-        <div class="sectionHeader">
-          <h2>Guided Water-point Scenario</h2>
-          <div class="actions">
-            <button id="resetDemo" type="button" class="secondary">Reset log</button>
-            <button id="resetDemoData" type="button">Reset demo data</button>
-          </div>
-        </div>
-        <div class="scenario">
-          <article class="scenarioStep">
-            <span>1</span>
-            <h3>Submit first signal</h3>
-            <p>Resource tension at the north water point enters the anonymous intake flow.</p>
-            <button type="button" data-demo-action="report">Submit report</button>
-          </article>
-          <article class="scenarioStep">
-            <span>2</span>
-            <h3>Add supporting evidence</h3>
-            <p>A text evidence note is hashed, locally encrypted, and queued as metadata only.</p>
-            <button type="button" data-demo-action="evidence">Upload evidence note</button>
-          </article>
-          <article class="scenarioStep">
-            <span>3</span>
-            <h3>Show resource pressure</h3>
-            <p>Simulated pump downtime and queue pressure add a resource anomaly.</p>
-            <button type="button" data-demo-action="resource">Simulate sensor</button>
-          </article>
-          <article class="scenarioStep">
-            <span>4</span>
-            <h3>Log rumor spread</h3>
-            <p>Stewards record a repeated aid-diversion rumor for human review.</p>
-            <button type="button" data-demo-action="rumor">Log rumor</button>
-          </article>
-        </div>
-        <div class="panel">
-          <h2>Scenario Log</h2>
-          <div id="demoResult" class="result" role="status"></div>
-          <div id="demoLog" class="queueList"></div>
-        </div>
-      </section>
+          <section id="access" class="view">
+            <section id="accessPanel" class="accessPanel">
+              <div class="panel">
+                <div class="sectionHeader flush">
+                  <div>
+                    <h2>Production Access</h2>
+                    <p class="sectionSub">Sign in, bootstrap a tenant, or enroll MFA.</p>
+                  </div>
+                  <div class="actions">
+                    <button id="logoutStaff" type="button" class="secondary" hidden>Sign out</button>
+                  </div>
+                </div>
+                <div id="sessionSummary" class="result" role="status">Checking production API...</div>
+                <div class="accessGrid">
+                  <form id="loginForm" class="form compactForm">
+                    <h3>Sign in</h3>
+                    <label>Email
+                      <input name="email" type="email" autocomplete="username" required />
+                    </label>
+                    <label>Password
+                      <input name="password" type="password" autocomplete="current-password" required />
+                    </label>
+                    <label>MFA code
+                      <input name="mfa_code" inputmode="numeric" autocomplete="one-time-code" />
+                    </label>
+                    <button type="submit">Sign in</button>
+                  </form>
+                  <form id="mfaForm" class="form compactForm" hidden>
+                    <h3>MFA</h3>
+                    <label class="wide">Authenticator secret
+                      <input id="mfaSecret" readonly />
+                    </label>
+                    <label>MFA code
+                      <input name="code" inputmode="numeric" autocomplete="one-time-code" required />
+                    </label>
+                    <button id="startMfa" type="button" class="secondary">Start MFA</button>
+                    <button type="submit">Verify MFA</button>
+                  </form>
+                  <form id="bootstrapForm" class="form compactForm">
+                    <h3>Bootstrap tenant</h3>
+                    <label class="wide">Bootstrap token
+                      <input name="bootstrap_token" type="password" autocomplete="off" />
+                    </label>
+                    <label>Organization
+                      <input name="organization_name" value="Demo Org" required />
+                    </label>
+                    <label>Site
+                      <input name="site_name" value="North Site" required />
+                    </label>
+                    <label>Rough location
+                      <input name="site_rough_location" value="North zone" />
+                    </label>
+                    <label>Admin email
+                      <input name="admin_email" type="email" autocomplete="username" required />
+                    </label>
+                    <label>Admin password
+                      <input name="admin_password" type="password" autocomplete="new-password" minlength="12" required />
+                    </label>
+                    <label>Admin name
+                      <input name="admin_name" value="Admin" />
+                    </label>
+                    <button type="submit">Bootstrap tenant</button>
+                  </form>
+                </div>
+              </div>
+            </section>
+          </section>
 
-      <section id="dashboard" class="view">
-        <div class="sectionHeader">
-          <h2>Responder Dashboard</h2>
-          <button id="refreshDashboard" type="button">Refresh</button>
-        </div>
-        <div class="filters" aria-label="Incident filters">
-          <label>Status
-            <select id="statusFilter">
-              <option value="">Any status</option>
-              <option value="new">New</option>
-              <option value="assigned">Assigned</option>
-              <option value="in_progress">In progress</option>
-              <option value="resolved">Resolved</option>
-            </select>
-          </label>
-          <label>Category
-            <select id="categoryFilter">
-              <option value="">Any category</option>
-              <option value="resource">Resource dispute</option>
-              <option value="threat">Threat or intimidation</option>
-              <option value="corruption">Corruption or abuse</option>
-              <option value="service_denial">Service denial</option>
-              <option value="rumor">Harmful rumor</option>
-              <option value="unsafe_route">Unsafe route</option>
-              <option value="work_exploitation">Work exploitation</option>
-              <option value="other">Other</option>
-            </select>
-          </label>
-          <label>Minimum severity
-            <select id="severityFilter">
-              <option value="1">1+</option>
-              <option value="2">2+</option>
-              <option value="3">3+</option>
-              <option value="4">4+</option>
-              <option value="5">5</option>
-            </select>
-          </label>
-        </div>
-        <div id="dashboardResult" class="result" role="status"></div>
-        <div id="incidentGrid" class="grid"></div>
-      </section>
+          <section id="evidence" class="view">
+            <div class="panel">
+              <div class="sectionHeader flush">
+                <div>
+                  <h2>Evidence Locker</h2>
+                  <p class="sectionSub">Metadata, hashes, and custody events.</p>
+                </div>
+              </div>
+              <form id="evidenceForm" class="form">
+                <label class="wide">Evidence file
+                  <input name="file" type="file" accept="image/*,audio/*,text/*,application/pdf" />
+                </label>
+                <label class="check wide">
+                  <input type="checkbox" name="sync_allowed" />
+                  Allow encrypted evidence metadata to sync
+                </label>
+                <button type="submit">Upload evidence</button>
+              </form>
+              <div id="evidenceResult" class="result" role="status"></div>
+            </div>
+            <div id="evidenceList" class="grid"></div>
+          </section>
 
-      <section id="evidence" class="view">
-        <div class="panel">
-          <h2>Civic Evidence Locker</h2>
-          <form id="evidenceForm" class="form">
-            <label class="wide">Evidence file
-              <input name="file" type="file" accept="image/*,audio/*,text/*,application/pdf" />
-            </label>
-            <label class="check wide">
-              <input type="checkbox" name="sync_allowed" />
-              Allow encrypted evidence metadata to sync
-            </label>
-            <button type="submit">Upload evidence</button>
-          </form>
-          <div id="evidenceResult" class="result" role="status"></div>
-        </div>
-        <div id="evidenceList" class="grid"></div>
-      </section>
+          <section id="resources" class="view">
+            <div class="sectionHeader">
+              <div>
+                <h2>Resource Monitor</h2>
+                <p class="sectionSub">Latest resource pressure and sensor anomalies.</p>
+              </div>
+              <button id="simulateSensor" type="button">Simulate event</button>
+            </div>
+            <div id="resourceGrid" class="grid"></div>
+          </section>
 
-      <section id="resources" class="view">
-        <div class="sectionHeader">
-          <h2>Resource Equity Monitor</h2>
-          <button id="simulateSensor" type="button">Simulate event</button>
-        </div>
-        <div id="resourceGrid" class="grid"></div>
-      </section>
+          <section id="routes" class="view">
+            <div class="panel">
+              <div class="sectionHeader flush">
+                <div>
+                  <h2>Route Alert</h2>
+                  <p class="sectionSub">Publish steward-reviewed route and service updates.</p>
+                </div>
+              </div>
+              <form id="routeForm" class="form">
+                <label>Route or service point
+                  <input name="route_label" value="Clinic route" required />
+                </label>
+                <label>Rough location
+                  <input name="rough_location" value="East corridor" />
+                </label>
+                <label>Alert type
+                  <select name="alert_type">
+                    <option value="caution">Caution</option>
+                    <option value="blocked">Blocked</option>
+                    <option value="service_update">Service update</option>
+                  </select>
+                </label>
+                <label>Status
+                  <select name="status">
+                    <option value="review">Steward review</option>
+                    <option value="caution">Caution</option>
+                    <option value="blocked">Blocked</option>
+                    <option value="open">Open</option>
+                  </select>
+                </label>
+                <label class="wide">Steward note
+                  <input name="note" maxlength="240" value="Stewards are checking reports about travel after dark." />
+                </label>
+                <button type="submit">Add route alert</button>
+              </form>
+              <div id="routeResult" class="result" role="status"></div>
+            </div>
+            <div class="sectionHeader">
+              <h2>Service Points</h2>
+              <button id="refreshRoutes" type="button" class="secondary">Refresh</button>
+            </div>
+            <div id="servicePointGrid" class="routeGrid"></div>
+            <div class="sectionHeader">
+              <h2>Route Alerts</h2>
+            </div>
+            <div id="routeAlertGrid" class="grid"></div>
+          </section>
 
-      <section id="rumors" class="view">
-        <div class="panel">
-          <h2>RumorShield Triage</h2>
-          <form id="rumorForm" class="form">
-            <label>Language
-              <select name="language">
-                <option value="en">English</option>
-                <option value="sw">Swahili</option>
-                <option value="fr">French</option>
-                <option value="ar">Arabic</option>
-              </select>
-            </label>
-            <label>Rough location
-              <input name="rough_location" value="North water point" />
-            </label>
-            <label class="wide">Rumor being heard
-              <textarea name="text" rows="4" minlength="8" maxlength="2000" required>People say aid is being diverted before it reaches the water point.</textarea>
-            </label>
-            <label class="wide">Response notes
-              <input name="response_notes" value="Stewards should verify through service desk channels." />
-            </label>
-            <button type="submit">Log rumor</button>
-          </form>
-        </div>
-        <div id="rumorGrid" class="grid"></div>
-      </section>
+          <section id="rumors" class="view">
+            <div class="panel">
+              <div class="sectionHeader flush">
+                <div>
+                  <h2>RumorShield</h2>
+                  <p class="sectionSub">Cluster repeated claims for human review.</p>
+                </div>
+              </div>
+              <form id="rumorForm" class="form">
+                <label>Language
+                  <select name="language">
+                    <option value="en">English</option>
+                    <option value="sw">Swahili</option>
+                    <option value="fr">French</option>
+                    <option value="ar">Arabic</option>
+                  </select>
+                </label>
+                <label>Rough location
+                  <input name="rough_location" value="North water point" />
+                </label>
+                <label class="wide">Rumor being heard
+                  <textarea name="text" rows="4" minlength="8" maxlength="2000" required>People say aid is being diverted before it reaches the water point.</textarea>
+                </label>
+                <label class="wide">Response notes
+                  <input name="response_notes" value="Stewards should verify through service desk channels." />
+                </label>
+                <button type="submit">Log rumor</button>
+              </form>
+            </div>
+            <div id="rumorGrid" class="grid"></div>
+          </section>
 
-      <section id="privacy" class="view">
-        <div class="sectionHeader">
-          <h2>Privacy Audit</h2>
-          <button id="refreshPrivacy" type="button">Refresh</button>
-        </div>
-        <div class="healthGrid" id="privacyCounts"></div>
-        <div class="policyGrid">
-          <article class="panel">
-            <h3>Stored locally</h3>
-            <div id="privacyLocal"></div>
-          </article>
-          <article class="panel">
-            <h3>Allowed to sync</h3>
-            <div id="privacySyncs"></div>
-          </article>
-          <article class="panel">
-            <h3>Never synced</h3>
-            <div id="privacyNever"></div>
-          </article>
-        </div>
-      </section>
+          <section id="work" class="view">
+            <div class="panel">
+              <div class="sectionHeader flush">
+                <div>
+                  <h2>FairWork Board</h2>
+                  <p class="sectionSub">Steward-checked work opportunities and exploitation reports.</p>
+                </div>
+                <div class="actions">
+                  <button id="reportExploitation" type="button" class="secondary">Report exploitation</button>
+                  <button id="refreshWork" type="button" class="secondary">Refresh</button>
+                </div>
+              </div>
+              <form id="workForm" class="form">
+                <label>Opportunity title
+                  <input name="title" value="Solar charging steward" required />
+                </label>
+                <label>Skill category
+                  <select name="skill_category">
+                    <option value="water">Water</option>
+                    <option value="solar">Solar</option>
+                    <option value="translation">Translation</option>
+                    <option value="repair">Repair</option>
+                    <option value="care">Care</option>
+                    <option value="logistics">Logistics</option>
+                  </select>
+                </label>
+                <label>Rough location
+                  <input name="rough_location" value="Central market" />
+                </label>
+                <label>Verification
+                  <select name="verification_status">
+                    <option value="steward_checked">Steward checked</option>
+                    <option value="unverified">Unverified</option>
+                    <option value="paused">Paused</option>
+                  </select>
+                </label>
+                <label class="wide">Safety note
+                  <input name="safety_note" maxlength="240" value="Community steward verified; no identity documents collected in the hub." />
+                </label>
+                <button type="submit">Add opportunity</button>
+              </form>
+              <div id="workResult" class="result" role="status"></div>
+            </div>
+            <div id="workGrid" class="grid"></div>
+          </section>
 
-      <section id="sync" class="view">
-        <div class="sectionHeader">
-          <h2>Coordinator Sync</h2>
-          <button id="runSync" type="button">Run sync</button>
-        </div>
-        <div class="healthGrid" id="nodeHealth">
-          <div class="metricTile">
-            <span>Hub</span>
-            <strong id="healthHub">Checking</strong>
-          </div>
-          <div class="metricTile">
-            <span>Database</span>
-            <strong id="healthDatabase">Checking</strong>
-          </div>
-          <div class="metricTile">
-            <span>Sync queue</span>
-            <strong id="syncStatus">Loading</strong>
-          </div>
-          <div class="metricTile">
-            <span>Latest resource</span>
-            <strong id="healthResource">Loading</strong>
-          </div>
-          <div class="metricTile">
-            <span>Last sync</span>
-            <strong id="healthLastSync">Not run</strong>
-          </div>
-        </div>
-        <div id="syncPreview" class="syncList"></div>
-      </section>
+          <section id="copilot" class="view">
+            <div class="pageHeader">
+              <div>
+                <h2>Copilot</h2>
+                <p>Investigate incidents with local runbook retrieval, recommendations, and citations.</p>
+              </div>
+              <button id="refreshCopilot" type="button">Refresh</button>
+            </div>
+            <div class="twoColumn">
+              <div class="panel">
+                <div class="sectionHeader flush">
+                  <div>
+                    <h2>Incident Investigation</h2>
+                    <p class="sectionSub">Run a deterministic Monitor, Retriever, Diagnosis, Planner, Verifier, Reporter pass.</p>
+                  </div>
+                </div>
+                <form id="copilotInvestigateForm" class="form">
+                  <label class="wide">Incident
+                    <select id="copilotIncidentSelect" name="incident_id"></select>
+                  </label>
+                  <button type="submit">Investigate</button>
+                </form>
+                <div id="copilotResult" class="result" role="status"></div>
+                <div id="copilotInvestigation" class="syncList"></div>
+              </div>
+              <aside class="panel sidePanel">
+                <h2>Runbooks</h2>
+                <p class="sectionSub">Local operational context used for retrieval.</p>
+                <div id="copilotRunbooks" class="queueList"></div>
+              </aside>
+            </div>
+            <div class="panel">
+              <div class="sectionHeader flush">
+                <div>
+                  <h2>Chat</h2>
+                  <p class="sectionSub">Ask grounded questions against runbooks and the selected incident.</p>
+                </div>
+                <button id="newCopilotSession" type="button" class="secondary">New session</button>
+              </div>
+              <form id="copilotChatForm" class="form">
+                <label class="wide">Message
+                  <textarea name="content" rows="3" required>What should responders do next?</textarea>
+                </label>
+                <button type="submit">Send</button>
+              </form>
+              <div id="copilotChat" class="syncList"></div>
+            </div>
+          </section>
 
-      <section id="routes" class="view">
-        <div class="panel">
-          <h2>SafeRoute And Service Map</h2>
-          <form id="routeForm" class="form">
-            <label>Route or service point
-              <input name="route_label" value="Clinic route" required />
-            </label>
-            <label>Rough location
-              <input name="rough_location" value="East corridor" />
-            </label>
-            <label>Alert type
-              <select name="alert_type">
-                <option value="caution">Caution</option>
-                <option value="blocked">Blocked</option>
-                <option value="service_update">Service update</option>
-              </select>
-            </label>
-            <label>Status
-              <select name="status">
-                <option value="review">Steward review</option>
-                <option value="caution">Caution</option>
-                <option value="blocked">Blocked</option>
-                <option value="open">Open</option>
-              </select>
-            </label>
-            <label class="wide">Steward note
-              <input name="note" maxlength="240" value="Stewards are checking reports about travel after dark." />
-            </label>
-            <button type="submit">Add route alert</button>
-          </form>
-          <div id="routeResult" class="result" role="status"></div>
-        </div>
-        <div class="sectionHeader">
-          <h2>Service Points</h2>
-          <button id="refreshRoutes" type="button">Refresh</button>
-        </div>
-        <div id="servicePointGrid" class="routeGrid"></div>
-        <div class="sectionHeader">
-          <h2>Route Alerts</h2>
-        </div>
-        <div id="routeAlertGrid" class="grid"></div>
-      </section>
+          <section id="privacy" class="view">
+            <div class="sectionHeader">
+              <div>
+                <h2>Privacy Audit</h2>
+                <p class="sectionSub">Review stored, synced, and never-synced data classes.</p>
+              </div>
+              <button id="refreshPrivacy" type="button">Refresh</button>
+            </div>
+            <div class="healthGrid" id="privacyCounts"></div>
+            <div class="policyGrid">
+              <article class="panel">
+                <h3>Stored locally</h3>
+                <div id="privacyLocal"></div>
+              </article>
+              <article class="panel">
+                <h3>Allowed to sync</h3>
+                <div id="privacySyncs"></div>
+              </article>
+              <article class="panel">
+                <h3>Never synced</h3>
+                <div id="privacyNever"></div>
+              </article>
+            </div>
+          </section>
 
-      <section id="work" class="view">
-        <div class="panel">
-          <h2>FairWork Opportunity Board</h2>
-          <form id="workForm" class="form">
-            <label>Opportunity title
-              <input name="title" value="Solar charging steward" required />
-            </label>
-            <label>Skill category
-              <select name="skill_category">
-                <option value="water">Water</option>
-                <option value="solar">Solar</option>
-                <option value="translation">Translation</option>
-                <option value="repair">Repair</option>
-                <option value="care">Care</option>
-                <option value="logistics">Logistics</option>
-              </select>
-            </label>
-            <label>Rough location
-              <input name="rough_location" value="Central market" />
-            </label>
-            <label>Verification
-              <select name="verification_status">
-                <option value="steward_checked">Steward checked</option>
-                <option value="unverified">Unverified</option>
-                <option value="paused">Paused</option>
-              </select>
-            </label>
-            <label class="wide">Safety note
-              <input name="safety_note" maxlength="240" value="Community steward verified; no identity documents collected in the hub." />
-            </label>
-            <button type="submit">Add opportunity</button>
-          </form>
-          <div class="actions">
-            <button id="reportExploitation" type="button" class="secondary">Report exploitation</button>
-            <button id="refreshWork" type="button" class="secondary">Refresh</button>
-          </div>
-          <div id="workResult" class="result" role="status"></div>
-        </div>
-        <div id="workGrid" class="grid"></div>
-      </section>
-    </main>
+          <section id="sync" class="view">
+            <div class="sectionHeader">
+              <div>
+                <h2>Hub Sync</h2>
+                <p class="sectionSub">Coordinator sync status and audit preview.</p>
+              </div>
+              <button id="runSync" type="button">Run sync</button>
+            </div>
+            <div class="healthGrid" id="nodeHealth">
+              <div class="metricTile"><span>Hub</span><strong id="healthHub">Checking</strong></div>
+              <div class="metricTile"><span>Database</span><strong id="healthDatabase">Checking</strong></div>
+              <div class="metricTile"><span>Sync queue</span><strong id="syncStatus">Loading</strong></div>
+              <div class="metricTile"><span>Latest resource</span><strong id="healthResource">Loading</strong></div>
+              <div class="metricTile"><span>Last sync</span><strong id="healthLastSync">Not run</strong></div>
+            </div>
+            <div id="syncPreview" class="syncList"></div>
+          </section>
+
+          <section id="demo" class="view">
+            <div class="sectionHeader">
+              <div>
+                <h2>Water-point Scenario</h2>
+                <p class="sectionSub">Run the product demo sequence.</p>
+              </div>
+              <div class="actions">
+                <button id="resetDemo" type="button" class="secondary">Reset log</button>
+                <button id="clearDemoState" type="button">Clear demo state</button>
+              </div>
+            </div>
+            <div class="scenario">
+              <article class="scenarioStep">
+                <span>1</span>
+                <h3>Submit first signal</h3>
+                <p>Resource tension enters the anonymous intake flow.</p>
+                <button type="button" data-demo-action="report">Submit report</button>
+              </article>
+              <article class="scenarioStep">
+                <span>2</span>
+                <h3>Add evidence</h3>
+                <p>A note is hashed and registered as evidence metadata.</p>
+                <button type="button" data-demo-action="evidence">Upload evidence note</button>
+              </article>
+              <article class="scenarioStep">
+                <span>3</span>
+                <h3>Show pressure</h3>
+                <p>Pump downtime and queue pressure add a resource anomaly.</p>
+                <button type="button" data-demo-action="resource">Simulate sensor</button>
+              </article>
+              <article class="scenarioStep">
+                <span>4</span>
+                <h3>Log rumor</h3>
+                <p>Stewards record a repeated rumor for human review.</p>
+                <button type="button" data-demo-action="rumor">Log rumor</button>
+              </article>
+            </div>
+            <div class="panel">
+              <h2>Scenario Log</h2>
+              <div id="demoResult" class="result" role="status"></div>
+              <div id="demoLog" class="queueList"></div>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
 
     <script src="/app.js"></script>
   </body>
